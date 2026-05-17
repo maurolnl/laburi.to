@@ -1,15 +1,34 @@
 package employee
 
-import "fmt"
+import (
+	"context"
+)
 
-type EmployeeService struct {
-	repo *EmployeeRepository
+type EmployeeService interface {
+	CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest) error
+	GetEmployee(ctx context.Context, ID int32) (Employee, error)
 }
 
-func NewEmployeeService(repo *EmployeeRepository) *EmployeeService {
-	return &EmployeeService{repo: repo}
+type employeeService struct {
+	repo EmployeeStore
 }
 
-func (s *EmployeeService) GetEmployees() {
-	fmt.Println("Getting employees...")
+func NewService(repo EmployeeStore) EmployeeService {
+	return &employeeService{
+		repo: repo,
+	}
+}
+
+func (s *employeeService) CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest) error {
+	err := s.repo.CreateEmployee(ctx, employeeReq)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *employeeService) GetEmployee(ctx context.Context, ID int32) (Employee, error) {
+	return s.repo.GetEmployee(ctx, ID)
 }

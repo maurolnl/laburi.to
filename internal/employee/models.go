@@ -1,0 +1,113 @@
+package employee
+
+import "time"
+
+type (
+	CreateEmployeeRequest struct {
+		Position           string   `json:"position"`
+		Role               string   `json:"role"`
+		YearsOfExperience  string   `json:"years_of_experience"`
+		Certifications     []string `json:"certifications"`
+		CertificationsFile string   `json:"certifications_file"`
+		PortfolioURL       string   `json:"portfolio_url"`
+	}
+
+	Employee struct {
+		ID                 int32
+		Position           string
+		Role               string
+		YearsOfExperience  string
+		Certifications     []string
+		CertificationsFile string
+		PortfolioURL       string
+		CreatedAt          time.Time
+		UpdatedAt          time.Time
+	}
+
+	GetEmployeeResponse struct {
+		ID                 int32
+		Position           string
+		Role               string
+		YearsOfExperience  string
+		Certifications     []string
+		CertificationsFile string
+		PortfolioURL       string
+		CreatedAt          time.Time
+		UpdatedAt          time.Time
+	}
+
+	EmployeeTT struct {
+		Position                string   `json:"position"`
+		Role                    string   `json:"role"`
+		YearsOfExperience       string   `json:"yearsOfExperience"`
+		Certifications          []string `json:"certifications"`
+		CertificationsFile      string   `json:"certificationsFile"`
+		PortfolioURL            string   `json:"portfolioUrl"`
+		InternetConnectionType  []string `json:"internet_connection_type"`
+		InternetConnectionSpeed []string `json:"internet_connection_speed"`
+		Timezone                string   `json:"timezone"`
+		Os                      string   `json:"os"`
+		PaidSoftware            []string `json:"paid_software"`
+		AvailableHoursPerDay    int      `json:"available_hours_perDay"`
+		CompatibleProjects      []string `json:"compatible_projects"`
+		IncompatibleProjects    []string `json:"incompatible_projects"`
+		UniversityTitles        []struct {
+			Title         string `json:"title"`
+			Status        string `json:"status"`
+			Certification string `json:"certification"`
+			NonMultiple   string `json:"non_multiple"`
+		} `json:"university_titles"`
+		PostgraduateTitles []struct {
+			Title         string `json:"title"`
+			Status        string `json:"status"`
+			Certification string `json:"certification"`
+		} `json:"postgraduate_titles"`
+		StudiesOrientation []struct {
+			Title         string `json:"title"`
+			Status        string `json:"status"`
+			Certification string `json:"certification"`
+		} `json:"studies_orientation"`
+		TertiaryStudies []struct {
+			Title         string `json:"title"`
+			Status        string `json:"status"`
+			Certification string `json:"certification"`
+		} `json:"tertiary_studies"`
+	}
+
+	UpdateEmployeeRequest struct {
+		Position                string   `json:"position"`
+		Role                    string   `json:"role"`
+		YearsOfExperience       string   `json:"yearsOfExperience"`
+		Certifications          string   `json:"certifications"`
+		CertificationsFile      string   `json:"certificationsFile"`
+		PortfolioURL            string   `json:"portfolioUrl"`
+		InternetConnectionType  []string `json:"internet_connection_type"`
+		InternetConnectionSpeed []string `json:"internet_connection_speed"`
+		Timezone                string   `json:"timezone"`
+		Os                      string   `json:"os"`
+		PaidSoftware            []string `json:"paid_software"`
+		AvailableHoursPerDay    int      `json:"available_hours_perDay"`
+		CompatibleProjects      []string `json:"compatible_projects"`
+		IncompatibleProjects    []string `json:"incompatible_projects"`
+		UniversityTitles        []struct {
+			Title         string `json:"title"`
+			Status        string `json:"status"`
+			Certification string `json:"certification"`
+		} `json:"university_titles"`
+		PostgraduateTitles []struct {
+			Title         string `json:"title"`
+			Status        string `json:"status"`
+			Certification string `json:"certification"`
+		} `json:"postgraduate_titles"`
+		StudiesOrientation []struct {
+			Title         string `json:"title"`
+			Status        string `json:"status"`
+			Certification string `json:"certification"`
+		} `json:"studies_orientation"`
+		TertiaryStudies []struct {
+			Title         string `json:"title"`
+			Status        string `json:"status"`
+			Certification string `json:"certification"`
+		} `json:"tertiary_studies"`
+	}
+)

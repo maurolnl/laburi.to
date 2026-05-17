@@ -1,21 +1,48 @@
 package main
 
 import (
-	"net/http"
+	"log"
+	"os"
 
-	"fmt"
-
-	"github.com/go-chi/chi/v5"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 func main() {
-	r := chi.NewRouter()
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Hello, World"))
-	})
+	loadEnv()
+	port := getPort()
 
-	port := 8080
-	fmt.Println("Server is running on port 8080")
-	http.ListenAndServe(fmt.Sprintf(":%d", port), r)
+	cfg := config{
+		addr: ":" + port,
+		db:   dbConfig{},
+	}
 
+	api := application{
+		config: cfg,
+	}
+
+	h := api.mount()
+	if err := api.run(h); err != nil {
+		logErrorAndFail(err)
+	}
+}
+
+func loadEnv() {
+	if err := godotenv.Load(".env"); err != nil {
+		logErrorAndFail(err)
+	}
+}
+
+func getPort() string {
+	port := "8080"
+	if envPort, exists := os.LookupEnv("APP_PORT"); exists {
+		port = envPort
+	}
+
+	return port
+}
+
+func logErrorAndFail(err error) {
+	log.Printf("Server has failed to start, err: %s", err)
+	os.Exit(1)
 }
