@@ -19,7 +19,7 @@ func NewHandler(service EmployeeService) *handler {
 	}
 }
 
-func (h *handler) CreateEmployee(w http.ResponseWriter, r *http.Request) {
+func (h *handler) CreateEmployee(w http.ResponseWriter, r *http.Request, userID int32) {
 	defer r.Body.Close()
 
 	employeeRequest := CreateEmployeeRequest{}
@@ -39,7 +39,7 @@ func (h *handler) CreateEmployee(w http.ResponseWriter, r *http.Request) {
 	internal.RespondWithNoBody(w, http.StatusCreated)
 }
 
-func (h *handler) GetEmployee(w http.ResponseWriter, r *http.Request) {
+func (h *handler) GetEmployee(w http.ResponseWriter, r *http.Request, userID int32) {
 	defer r.Body.Close()
 
 	employeeIDPV := r.PathValue("employeeID")

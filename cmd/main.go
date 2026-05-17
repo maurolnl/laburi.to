@@ -12,9 +12,12 @@ func main() {
 	loadEnv()
 	port := getPort()
 
+	secretKey := os.Getenv("SECRET_KEY")
+
 	cfg := config{
-		addr: ":" + port,
-		db:   dbConfig{},
+		addr:      ":" + port,
+		db:        dbConfig{},
+		secretKey: secretKey,
 	}
 
 	api := application{

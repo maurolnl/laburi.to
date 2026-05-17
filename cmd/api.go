@@ -8,6 +8,7 @@ import (
 
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/database"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/employee"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/user"
 )
 
 type application struct {
@@ -15,8 +16,9 @@ type application struct {
 }
 
 type config struct {
-	addr string
-	db   dbConfig
+	addr      string
+	db        dbConfig
+	secretKey string
 }
 
 type dbConfig struct {
@@ -37,13 +39,20 @@ func (app *application) mount() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("laburito!"))
 	})
-
-	employeeRepo := employee.NewRepository(database.New(db))
+	psqlDB := database.New(db)
+	employeeRepo := employee.NewRepository(psqlDB)
 	employeeService := employee.NewService(employeeRepo)
 	employeeHandler := employee.NewHandler(employeeService)
 
-	mux.HandleFunc("POST /employees", employeeHandler.CreateEmployee)
-	mux.HandleFunc("GET /employees/{employeeID}", employeeHandler.GetEmployee)
+	userRepo := user.NewRepository(psqlDB)
+	userService := user.NewService(userRepo, app.config.secretKey)
+	userHandler := user.NewHandler(userService)
+
+	mux.HandleFunc("POST /employees", app.authenticatedUserMiddleWare(employeeHandler.CreateEmployee))
+	mux.HandleFunc("GET /employees/{employeeID}", app.authenticatedUserMiddleWare(employeeHandler.GetEmployee))
+
+	mux.HandleFunc("POST /auth/register", userHandler.RegisterUser)
+	mux.HandleFunc("POST /auth/login", userHandler.Login)
 
 	return mux
 }

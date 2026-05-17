@@ -75,3 +75,20 @@ type EmployeeProfileTech struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
+
+type RefreshToken struct {
+	Token     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	UserID    int32
+	ExpiresAt time.Time
+	RevokedAt sql.NullTime
+}
+
+type User struct {
+	ID             int32
+	Email          string
+	HashedPassword string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
