@@ -51,16 +51,3 @@ func GenerateGrants(userID int32, secretKey string, ctx context.Context) (token,
 
 	return token, refreshToken, refreshTokenExpiration, nil
 }
-
-// createRefreshTokenParams := database.CreateRefreshTokenParams{
-// 	Token:     refreshToken,
-// 	CreatedAt: time.Now(),
-// 	UpdatedAt: time.Now(),
-// 	UserID:    userID,
-// 	ExpiresAt: refreshTokenExpiration,
-// }
-
-// _, err = c.db.CreateRefreshToken(ctx, createRefreshTokenParams)
-// if err != nil {
-// 	return "", "", time.Time{}, err
-// }

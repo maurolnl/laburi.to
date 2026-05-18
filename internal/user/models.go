@@ -7,8 +7,8 @@ import "time"
 // <> = Optional
 type (
 	CreateUserReq struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email    string `json:"email" validate:"required,email"`
+		Password string `json:"password" validate:"required,min=8"`
 	}
 	User struct {
 		ID             int32
@@ -22,8 +22,8 @@ type (
 		RefreshToken string `json:"refreshToken"`
 	}
 	LoginUserRequest struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email    string `json:"email" validate:"required,email"`
+		Password string `json:"password" validate:"required"`
 	}
 	SaveRefreshToken struct {
 		Token     string

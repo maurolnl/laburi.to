@@ -4,16 +4,19 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal"
 )
 
 type UserHandler struct {
-	service UserService
+	service  UserService
+	validate *validator.Validate
 }
 
-func NewHandler(userService UserService) *UserHandler {
+func NewHandler(userService UserService, validate *validator.Validate) *UserHandler {
 	return &UserHandler{
-		service: userService,
+		service:  userService,
+		validate: validate,
 	}
 }
 
@@ -23,6 +26,11 @@ func (h *UserHandler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := h.validate.Struct(user); err != nil {
+		internal.PrintValidatorError(w, err)
 		return
 	}
 
@@ -39,12 +47,12 @@ func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 
 	var creds LoginUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "Could not decode request body", http.StatusBadRequest)
 		return
 	}
 
-	if creds.Email == "" || creds.Password == "" {
-		http.Error(w, ErrEmailOrPasswordRequired.Error(), http.StatusBadRequest)
+	if err := h.validate.Struct(creds); err != nil {
+		internal.PrintValidatorError(w, err)
 		return
 	}
 

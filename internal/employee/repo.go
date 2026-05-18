@@ -19,7 +19,7 @@ func (r *EmployeeRepository) CreateEmployee(ctx context.Context, employee Create
 	_, err := r.db.CreateEmployee(ctx, database.CreateEmployeeParams{
 		Position:          employee.Position,
 		Role:              employee.Role,
-		YearsOfExperience: employee.YearsOfExperience,
+		YearsOfExperience: string(employee.YearsOfExperience),
 		Certifications:    employee.Certifications,
 		PortfolioUrl:      sql.NullString{String: employee.PortfolioURL},
 	})
@@ -44,17 +44,3 @@ func (r *EmployeeRepository) GetEmployee(ctx context.Context, ID int32) (Employe
 		UpdatedAt:         employee.UpdatedAt,
 	}, err
 }
-
-// func (r *EmployeeRepository) GetEmployeeById(id int) (*Employee, error) {
-// 	var employee Employee
-// 	err := r.db.QueryRow("SELECT id, name, email FROM employees WHERE id = ?", id).Scan(&employee.ID, &employee.Name, &employee.Email, &employee.Password)
-// 	return &employee, err
-// }
-
-// func (r *EmployeeRepository) GetAllEmployees() ([]Employee, error) {
-// 	var employees []Employee
-// 	rows, err := r.db.Query("SELECT * FROM employees")
-// 	rows.Scan(employees)
-
-// 	return employees, err
-// }

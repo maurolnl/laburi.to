@@ -7,7 +7,7 @@ CREATE TABLE employees (
     certifications TEXT[],
     portfolio_url TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     CONSTRAINT employee_years_of_experience_check
       CHECK (years_of_experience IN ('less_1y', '1y', '2_to_5y', '5_to_10y', 'more_10y'))

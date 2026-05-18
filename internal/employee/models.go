@@ -2,14 +2,23 @@ package employee
 
 import "time"
 
+type YearsOfExperience string
+
+const (
+	YearsLess1Y  YearsOfExperience = "less_1y"
+	Years1Y      YearsOfExperience = "1y"
+	Years2To5Y   YearsOfExperience = "2_to_5y"
+	Years5To10Y  YearsOfExperience = "5_to_10y"
+	YearsMore10Y YearsOfExperience = "more_10y"
+)
+
 type (
 	CreateEmployeeRequest struct {
-		Position           string   `json:"position"`
-		Role               string   `json:"role"`
-		YearsOfExperience  string   `json:"years_of_experience"`
-		Certifications     []string `json:"certifications"`
-		CertificationsFile string   `json:"certifications_file"`
-		PortfolioURL       string   `json:"portfolio_url"`
+		Position          string            `json:"position" validate:"required,min=1"`
+		Role              string            `json:"role" validate:"required,min=1"`
+		YearsOfExperience YearsOfExperience `json:"years_of_experience" validate:"required,oneof=less_1y 1y 2_to_5y 5_to_10y more_10y"`
+		Certifications    []string          `json:"certifications"`
+		PortfolioURL      string            `json:"portfolio_url" validate:"omitempty,url"`
 	}
 
 	Employee struct {

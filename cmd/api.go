@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/database"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/employee"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/user"
@@ -26,6 +27,31 @@ type dbConfig struct {
 }
 
 func (app *application) mount() http.Handler {
+	mux := http.NewServeMux()
+
+	psqlDB := app.mountDB()
+
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("laburito!"))
+	})
+
+	app.mountFeatureRoutes(mux, psqlDB)
+
+	return mux
+}
+
+func (app *application) mountFeatureRoutes(mux *http.ServeMux, psqlDB *database.Queries) {
+	validator := validator.New(validator.WithRequiredStructEnabled())
+
+	employeeHandler := employee.BuildHandlers(psqlDB, validator)
+	middleware := employee.MountEmployee{Middleware: app.authenticatedUserMiddleWare}
+	employee.RegisterRoutes(mux, employeeHandler, middleware)
+
+	userHandler := user.BuildHandlers(psqlDB, app.config.secretKey, validator)
+	user.RegisterRoutes(mux, userHandler)
+}
+
+func (app *application) mountDB() *database.Queries {
 	dbURL := os.Getenv("DB_URL")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -33,28 +59,7 @@ func (app *application) mount() http.Handler {
 		os.Exit(1)
 	}
 
-	mux := http.NewServeMux()
-
-	//Handlers
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("laburito!"))
-	})
-	psqlDB := database.New(db)
-	employeeRepo := employee.NewRepository(psqlDB)
-	employeeService := employee.NewService(employeeRepo)
-	employeeHandler := employee.NewHandler(employeeService)
-
-	userRepo := user.NewRepository(psqlDB)
-	userService := user.NewService(userRepo, app.config.secretKey)
-	userHandler := user.NewHandler(userService)
-
-	mux.HandleFunc("POST /employees", app.authenticatedUserMiddleWare(employeeHandler.CreateEmployee))
-	mux.HandleFunc("GET /employees/{employeeID}", app.authenticatedUserMiddleWare(employeeHandler.GetEmployee))
-
-	mux.HandleFunc("POST /auth/register", userHandler.RegisterUser)
-	mux.HandleFunc("POST /auth/login", userHandler.Login)
-
-	return mux
+	return database.New(db)
 }
 
 func (app *application) run(h http.Handler) error {
