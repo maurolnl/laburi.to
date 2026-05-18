@@ -18,6 +18,7 @@ type Employee struct {
 	PortfolioUrl      sql.NullString
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	UserID            int32
 }
 
 type EmployeeEducation struct {

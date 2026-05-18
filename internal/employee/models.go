@@ -23,6 +23,7 @@ type (
 
 	Employee struct {
 		ID                 int32
+		Email              string
 		Position           string
 		Role               string
 		YearsOfExperience  string
@@ -35,6 +36,7 @@ type (
 
 	GetEmployeeResponse struct {
 		ID                 int32
+		Email              string
 		Position           string
 		Role               string
 		YearsOfExperience  string

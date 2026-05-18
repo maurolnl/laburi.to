@@ -5,7 +5,7 @@ import (
 )
 
 type EmployeeService interface {
-	CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest) error
+	CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest, userID int32) error
 	GetEmployee(ctx context.Context, ID int32) (Employee, error)
 }
 
@@ -19,8 +19,8 @@ func NewService(repo EmployeeStore) EmployeeService {
 	}
 }
 
-func (s *employeeService) CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest) error {
-	err := s.repo.CreateEmployee(ctx, employeeReq)
+func (s *employeeService) CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest, userID int32) error {
+	err := s.repo.CreateEmployee(ctx, employeeReq, userID)
 
 	if err != nil {
 		return err

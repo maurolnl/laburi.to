@@ -29,7 +29,7 @@ func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request,
 	err := json.NewDecoder(r.Body).Decode(&employeeRequest)
 
 	if err != nil {
-		internal.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf(ErrInvalidEmployeeRequest.Error(), err.Error()))
+		internal.RespondWithError(w, http.StatusBadRequest, ErrInvalidEmployeeRequest.Error())
 		return
 	}
 
@@ -38,9 +38,9 @@ func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	err = h.service.CreateEmployee(r.Context(), employeeRequest)
+	err = h.service.CreateEmployee(r.Context(), employeeRequest, userID)
 	if err != nil {
-		internal.RespondWithError(w, http.StatusInternalServerError, ErrInternalErrorCreatingEmployee.Error())
+		internal.RespondWithError(w, http.StatusInternalServerError, fmt.Sprintf("%s: %s", ErrInternalErrorCreatingEmployee.Error(), err.Error()))
 		return
 	}
 
@@ -63,9 +63,14 @@ func (h *EmployeeHandler) GetEmployee(w http.ResponseWriter, r *http.Request, us
 	}
 
 	employee, err := h.service.GetEmployee(r.Context(), int32(employeeID))
+	if err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("%s: %s", ErrEmployeeNotFound, err.Error()))
+		return
+	}
 
 	employeeResponse := GetEmployeeResponse{
 		ID:                 employee.ID,
+		Email:              employee.Email,
 		Position:           employee.Position,
 		Role:               employee.Role,
 		YearsOfExperience:  employee.YearsOfExperience,
@@ -75,5 +80,6 @@ func (h *EmployeeHandler) GetEmployee(w http.ResponseWriter, r *http.Request, us
 		CreatedAt:          employee.CreatedAt,
 		UpdatedAt:          employee.UpdatedAt,
 	}
+
 	internal.RespondWithJson(w, http.StatusOK, employeeResponse)
 }

@@ -8,22 +8,24 @@ package database
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	"github.com/lib/pq"
 )
 
 const createEmployee = `-- name: CreateEmployee :one
-INSERT INTO employees(position, role, years_of_experience, certifications, portfolio_url,created_at,updated_at )
+INSERT INTO employees(position, role, years_of_experience, certifications, portfolio_url, user_id, created_at, updated_at)
 VALUES(
   $1,
   $2,
   $3,
   $4,
   $5,
+  $6,
   NOW(),
   NOW()
 )
-RETURNING id, position, role, years_of_experience, certifications, portfolio_url, created_at, updated_at
+RETURNING id, position, role, years_of_experience, certifications, portfolio_url, created_at, updated_at, user_id
 `
 
 type CreateEmployeeParams struct {
@@ -32,6 +34,7 @@ type CreateEmployeeParams struct {
 	YearsOfExperience string
 	Certifications    []string
 	PortfolioUrl      sql.NullString
+	UserID            int32
 }
 
 func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) (Employee, error) {
@@ -41,6 +44,7 @@ func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) 
 		arg.YearsOfExperience,
 		pq.Array(arg.Certifications),
 		arg.PortfolioUrl,
+		arg.UserID,
 	)
 	var i Employee
 	err := row.Scan(
@@ -52,17 +56,31 @@ func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) 
 		&i.PortfolioUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UserID,
 	)
 	return i, err
 }
 
 const getEmployee = `-- name: GetEmployee :one
-SELECT id, position, role, years_of_experience, certifications, portfolio_url, created_at, updated_at FROM employees WHERE id = $1
+SELECT employees.id, employees.position, employees.role, employees.years_of_experience, employees.certifications, employees.portfolio_url, employees.created_at, employees.updated_at, employees.user_id, users.email FROM employees JOIN users ON employees.user_id = users.id WHERE employees.id = $1
 `
 
-func (q *Queries) GetEmployee(ctx context.Context, id int32) (Employee, error) {
+type GetEmployeeRow struct {
+	ID                int32
+	Position          string
+	Role              string
+	YearsOfExperience string
+	Certifications    []string
+	PortfolioUrl      sql.NullString
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	UserID            int32
+	Email             string
+}
+
+func (q *Queries) GetEmployee(ctx context.Context, id int32) (GetEmployeeRow, error) {
 	row := q.db.QueryRowContext(ctx, getEmployee, id)
-	var i Employee
+	var i GetEmployeeRow
 	err := row.Scan(
 		&i.ID,
 		&i.Position,
@@ -72,6 +90,8 @@ func (q *Queries) GetEmployee(ctx context.Context, id int32) (Employee, error) {
 		&i.PortfolioUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.UserID,
+		&i.Email,
 	)
 	return i, err
 }
