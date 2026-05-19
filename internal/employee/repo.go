@@ -21,8 +21,11 @@ func (r *EmployeeRepository) CreateEmployee(ctx context.Context, employee Create
 		Role:              employee.Role,
 		YearsOfExperience: string(employee.YearsOfExperience),
 		Certifications:    employee.Certifications,
-		PortfolioUrl:      sql.NullString{String: employee.PortfolioURL},
-		UserID:            userID,
+		PortfolioUrl: sql.NullString{
+			String: employee.PortfolioURL,
+			Valid:  employee.PortfolioURL != "",
+		},
+		UserID: userID,
 	})
 
 	return err
