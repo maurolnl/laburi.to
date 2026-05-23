@@ -13,11 +13,15 @@ func main() {
 	port := getPort()
 
 	secretKey := os.Getenv("SECRET_KEY")
+	s3Bucket := os.Getenv("AWS_S3_BUCKET")
 
-	cfg := config{
+	cfg := appConfig{
 		addr:      ":" + port,
 		db:        dbConfig{},
 		secretKey: secretKey,
+		s3Cfg: s3Config{
+			bucket: s3Bucket,
+		},
 	}
 
 	api := application{

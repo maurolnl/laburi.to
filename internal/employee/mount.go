@@ -6,15 +6,16 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/database"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/uploader"
 )
 
 type MountEmployee struct {
 	Middleware internal.AuthMiddleware
 }
 
-func BuildHandlers(psqlDB *database.Queries, validate *validator.Validate) *EmployeeHandler {
+func BuildHandlers(psqlDB *database.Queries, validate *validator.Validate, uploader uploader.Service) *EmployeeHandler {
 	employeeRepo := NewRepository(psqlDB)
-	employeeService := NewService(employeeRepo)
+	employeeService := NewService(employeeRepo, uploader)
 	employeeHandler := NewHandler(employeeService, validate)
 
 	return employeeHandler

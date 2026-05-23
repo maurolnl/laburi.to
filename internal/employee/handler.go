@@ -1,3 +1,5 @@
+// Package employee provides HTTP handlers and business logic
+// managing employee profiles
 package employee
 
 import (
@@ -17,8 +19,6 @@ type EmployeeHandler struct {
 	service  EmployeeService
 	validate *validator.Validate
 }
-
-const maxUploadSize = 5 << 20 // 5 MB
 
 func NewHandler(service EmployeeService, validate *validator.Validate) *EmployeeHandler {
 	return &EmployeeHandler{
@@ -42,6 +42,24 @@ func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	file, header, err := getFileFromBody(r)
+	if err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if file != nil {
+		defer file.Close()
+	}
+
+	var filename, fileContentType string
+	var fileSize int64
+	if header != nil {
+		filename = header.Filename
+		fileContentType = header.Header.Get("Content-Type")
+		fileSize = header.Size
+	}
+
 	employeeRequest := CreateEmployeeRequest{
 		Position:          r.FormValue("position"),
 		Role:              r.FormValue("role"),
@@ -55,19 +73,15 @@ func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	file, err := getFileFromBody(r)
-	if err != nil {
-		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	if file != nil {
-		//here we should upload it to s3 and get the URL
-		fmt.Printf("Got file: %v", file)
-		file.Close()
-	}
-
-	err = h.service.CreateEmployee(r.Context(), employeeRequest, userID)
+	err = h.service.CreateEmployee(
+		r.Context(),
+		employeeRequest,
+		userID,
+		file,
+		filename,
+		fileContentType,
+		fileSize,
+	)
 	if err != nil {
 		internal.RespondWithError(w, http.StatusInternalServerError, fmt.Sprintf("%s: %s", ErrInternalErrorCreatingEmployee.Error(), err.Error()))
 		return
@@ -97,18 +111,7 @@ func (h *EmployeeHandler) GetEmployee(w http.ResponseWriter, r *http.Request, us
 		return
 	}
 
-	employeeResponse := GetEmployeeResponse{
-		ID:                 employee.ID,
-		Email:              employee.Email,
-		Position:           employee.Position,
-		Role:               employee.Role,
-		YearsOfExperience:  employee.YearsOfExperience,
-		Certifications:     employee.Certifications,
-		CertificationsFile: employee.CertificationsFile,
-		PortfolioURL:       employee.PortfolioURL,
-		CreatedAt:          employee.CreatedAt,
-		UpdatedAt:          employee.UpdatedAt,
-	}
+	employeeResponse := GetEmployeeResponse(employee)
 
 	internal.RespondWithJson(w, http.StatusOK, employeeResponse)
 }
@@ -119,28 +122,30 @@ var (
 	ErrUnsupportedFileType = fmt.Errorf("unsupported file type")
 )
 
-func getFileFromBody(r *http.Request) (multipart.File, error) {
+func getFileFromBody(r *http.Request) (multipart.File, *multipart.FileHeader, error) {
 	file, header, err := r.FormFile("certifications_file")
 	if err != nil && err != http.ErrMissingFile {
-		return nil, ErrInvalidFile
+		return nil, nil, ErrInvalidFile
 	}
 
 	if file != nil {
 		if header.Size > maxUploadSize {
 			file.Close()
-			return nil, ErrFileTooLarge
+			return nil, nil, ErrFileTooLarge
 		}
 
-		switch header.Header.Get("Content-Type") {
+		contentType := header.Header.Get("Content-Type")
+
+		switch contentType {
 		case "application/pdf":
-			return file, nil
+			return file, header, nil
 		default:
 			file.Close()
-			return nil, ErrUnsupportedFileType
+			return nil, nil, ErrUnsupportedFileType
 		}
 	}
 
-	return nil, nil
+	return nil, nil, nil
 }
 
 func getCertificationsFromForm(r *http.Request) []string {
@@ -161,15 +166,4 @@ func getCertificationsFromForm(r *http.Request) []string {
 	}
 
 	return certifications
-}
-
-func getPortfolioURLFromForm(r *http.Request) string {
-	if r.MultipartForm == nil {
-		return ""
-	}
-
-	if values := r.MultipartForm.Value["portfolio_url"]; len(values) > 0 {
-		return values[0]
-	}
-	return ""
 }

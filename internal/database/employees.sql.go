@@ -14,18 +14,34 @@ import (
 )
 
 const createEmployee = `-- name: CreateEmployee :one
-INSERT INTO employees(position, role, years_of_experience, certifications, portfolio_url, user_id, created_at, updated_at)
-VALUES(
-  $1,
-  $2,
-  $3,
-  $4,
-  $5,
-  $6,
-  NOW(),
-  NOW()
-)
-RETURNING id, position, role, years_of_experience, certifications, portfolio_url, created_at, updated_at, user_id
+WITH new_employee AS (
+  INSERT INTO employees(position, role, years_of_experience, certifications, portfolio_url, user_id, created_at, updated_at)
+  VALUES(
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6,
+    NOW(),
+    NOW()
+  )
+  RETURNING id, position, role, years_of_experience, certifications, portfolio_url, created_at, updated_at, user_id
+) INSERT INTO employee_files(
+    employee_id,
+    type,
+    bucket,
+    object_key,
+    original_filename,
+    content_type,
+    size_bytes,
+    checksum_sha256,
+    status,
+    created_at,
+    uploaded_at,
+    updated_at
+) SELECT id, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW(), NOW() FROM 
+  new_employee returning employee_id
 `
 
 type CreateEmployeeParams struct {
@@ -35,9 +51,17 @@ type CreateEmployeeParams struct {
 	Certifications    []string
 	PortfolioUrl      sql.NullString
 	UserID            int32
+	Type              string
+	Bucket            string
+	ObjectKey         string
+	OriginalFilename  string
+	ContentType       string
+	SizeBytes         int64
+	ChecksumSha256    sql.NullString
+	Status            string
 }
 
-func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) (Employee, error) {
+func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) (int32, error) {
 	row := q.db.QueryRowContext(ctx, createEmployee,
 		arg.Position,
 		arg.Role,
@@ -45,20 +69,18 @@ func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) 
 		pq.Array(arg.Certifications),
 		arg.PortfolioUrl,
 		arg.UserID,
+		arg.Type,
+		arg.Bucket,
+		arg.ObjectKey,
+		arg.OriginalFilename,
+		arg.ContentType,
+		arg.SizeBytes,
+		arg.ChecksumSha256,
+		arg.Status,
 	)
-	var i Employee
-	err := row.Scan(
-		&i.ID,
-		&i.Position,
-		&i.Role,
-		&i.YearsOfExperience,
-		pq.Array(&i.Certifications),
-		&i.PortfolioUrl,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.UserID,
-	)
-	return i, err
+	var employee_id int32
+	err := row.Scan(&employee_id)
+	return employee_id, err
 }
 
 const getEmployee = `-- name: GetEmployee :one

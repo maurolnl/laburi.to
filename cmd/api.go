@@ -9,16 +9,23 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/database"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/employee"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/uploader"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/user"
 )
 
 type application struct {
-	config config
+	config appConfig
 }
 
-type config struct {
+type s3Config struct {
+	// uploader *transfermanager.Client
+	bucket string
+}
+
+type appConfig struct {
 	addr      string
 	db        dbConfig
+	s3Cfg     s3Config
 	secretKey string
 }
 
@@ -41,9 +48,12 @@ func (app *application) mount() http.Handler {
 }
 
 func (app *application) mountFeatureRoutes(mux *http.ServeMux, psqlDB *database.Queries) {
-	validator := validator.New(validator.WithRequiredStructEnabled())
+	bucket := app.config.s3Cfg.bucket
+	uploaderService := uploader.NewService(bucket, certificationsKeyPrefix)
 
-	employeeHandler := employee.BuildHandlers(psqlDB, validator)
+	validator := validator.New(validator.WithRequiredStructEnabled())
+	employeeHandler := employee.BuildHandlers(psqlDB, validator, uploaderService)
+
 	middleware := employee.MountEmployee{Middleware: app.authenticatedUserMiddleWare}
 	employee.RegisterRoutes(mux, employeeHandler, middleware)
 

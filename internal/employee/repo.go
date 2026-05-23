@@ -15,8 +15,8 @@ func NewRepository(db *database.Queries) *EmployeeRepository {
 	return &EmployeeRepository{db: db}
 }
 
-func (r *EmployeeRepository) CreateEmployee(ctx context.Context, employee CreateEmployeeRequest, userID int32) error {
-	_, err := r.db.CreateEmployee(ctx, database.CreateEmployeeParams{
+func (r *EmployeeRepository) CreateEmployee(ctx context.Context, employee CreateEmployeeRequest, userID int32, file EmployeeFileMetadata) (int32, error) {
+	employeeID, err := r.db.CreateEmployee(ctx, database.CreateEmployeeParams{
 		Position:          employee.Position,
 		Role:              employee.Role,
 		YearsOfExperience: string(employee.YearsOfExperience),
@@ -25,10 +25,24 @@ func (r *EmployeeRepository) CreateEmployee(ctx context.Context, employee Create
 			String: employee.PortfolioURL,
 			Valid:  employee.PortfolioURL != "",
 		},
-		UserID: userID,
+		UserID:           userID,
+		Type:             file.Type,
+		Bucket:           file.Bucket,
+		ObjectKey:        file.ObjectKey,
+		OriginalFilename: file.OriginalFilename,
+		ContentType:      file.ContentType,
+		SizeBytes:        file.SizeBytes,
+		ChecksumSha256: sql.NullString{
+			String: file.ChecksumSHA256,
+			Valid:  file.ChecksumSHA256 != "",
+		},
+		Status: file.Status,
 	})
+	if err != nil {
+		return 0, err
+	}
 
-	return err
+	return employeeID, nil
 }
 
 func (r *EmployeeRepository) GetEmployee(ctx context.Context, ID int32) (Employee, error) {
