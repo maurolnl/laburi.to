@@ -23,5 +23,6 @@ func BuildHandlers(psqlDB *database.Queries, validate *validator.Validate, uploa
 
 func RegisterRoutes(mux *http.ServeMux, h *EmployeeHandler, middleware MountEmployee) {
 	mux.HandleFunc("POST /employees", middleware.Middleware(h.CreateEmployee))
+	mux.HandleFunc("PUT /employees/{employeeID}", middleware.Middleware(h.UpdateEmployee))
 	mux.HandleFunc("GET /employees/{employeeID}", middleware.Middleware(h.GetEmployee))
 }

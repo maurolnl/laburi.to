@@ -61,11 +61,13 @@ func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request,
 	}
 
 	employeeRequest := CreateEmployeeRequest{
-		Position:          r.FormValue("position"),
-		Role:              r.FormValue("role"),
-		YearsOfExperience: YearsOfExperience(r.FormValue("years_of_experience")),
-		Certifications:    getCertificationsFromForm(r),
-		PortfolioURL:      r.FormValue("portfolio_url"),
+		BaseEmployeeRequest: BaseEmployeeRequest{
+			Position:          r.FormValue("position"),
+			Role:              r.FormValue("role"),
+			YearsOfExperience: YearsOfExperience(r.FormValue("years_of_experience")),
+			Certifications:    getCertificationsFromForm(r),
+			PortfolioURL:      r.FormValue("portfolio_url"),
+		},
 	}
 
 	if err := h.validate.Struct(employeeRequest); err != nil {

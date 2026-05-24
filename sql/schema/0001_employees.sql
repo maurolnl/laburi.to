@@ -14,29 +14,38 @@ CREATE TABLE employees (
 );
 
 CREATE TABLE employee_profile_tech (
-    id SERIAL PRIMARY KEY,
-    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-    timezone TEXT NOT NULL,
-    os TEXT,
-    paid_software TEXT[] DEFAULT '{}',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  id SERIAL PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  os TEXT,
+  paid_software TEXT[] DEFAULT '{}',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT unique_profile_tech_by_employee UNIQUE(id, employee_id)
+  CONSTRAINT unique_profile_tech_by_employee UNIQUE(employee_id)
 );
 
 CREATE TABLE employee_internet_connections (
-    id SERIAL PRIMARY KEY,
-    employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-    type TEXT NOT NULL,
-    speed TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  id SERIAL PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  speed TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT employee_internet_connections_type_check
-        CHECK (type IN ('fiber', 'wifi', 'coaxial', 'adsl', 'mobile')),
-    CONSTRAINT employee_internet_connections_speed_check
-        CHECK (speed IN ('less_10mb', '20mb', '30mb', '40mb', 'more_50mb'))
+  CONSTRAINT employee_internet_connections_type_check
+      CHECK (type IN ('fiber', 'wifi', 'coaxial', 'adsl', 'mobile')),
+  CONSTRAINT employee_internet_connections_speed_check
+      CHECK (speed IN ('less_10mb', '20mb', '30mb', '40mb', 'more_50mb'))
+);
+
+CREATE TABLE employee_location (
+  id SERIAL PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  timezone TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT unique_employee_location UNIQUE(employee_id)
 );
 
 CREATE TABLE employee_profile_availability (
@@ -48,7 +57,7 @@ CREATE TABLE employee_profile_availability (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    CONSTRAINT unique_employee_availability UNIQUE(id, employee_id),
+    CONSTRAINT unique_employee_availability UNIQUE(employee_id),
     CONSTRAINT employee_profile_availability_hours_check
         CHECK (available_hours_per_day IS NULL OR available_hours_per_day BETWEEN 0 AND 24)
 );
@@ -118,4 +127,5 @@ DROP TABLE IF EXISTS employee_education;
 DROP TABLE IF EXISTS employee_profile_availability;
 DROP TABLE IF EXISTS employee_internet_connections;
 DROP TABLE IF EXISTS employee_profile_tech;
+DROP TABLE IF EXISTS employee_location;
 DROP TABLE IF EXISTS employees;

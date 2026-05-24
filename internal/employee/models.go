@@ -13,12 +13,15 @@ const (
 )
 
 type (
-	CreateEmployeeRequest struct {
+	BaseEmployeeRequest struct {
 		Position          string            `json:"position" validate:"required,min=1"`
 		Role              string            `json:"role" validate:"required,min=1"`
 		YearsOfExperience YearsOfExperience `json:"years_of_experience" validate:"required,oneof=less_1y 1y 2_to_5y 5_to_10y more_10y"`
 		Certifications    []string          `json:"certifications"`
 		PortfolioURL      string            `json:"portfolio_url" validate:"omitempty,url"`
+	}
+	CreateEmployeeRequest struct {
+		BaseEmployeeRequest
 	}
 
 	Employee struct {
@@ -47,78 +50,66 @@ type (
 		UpdatedAt          time.Time
 	}
 
-	EmployeeTT struct {
-		Position                string   `json:"position"`
-		Role                    string   `json:"role"`
-		YearsOfExperience       string   `json:"yearsOfExperience"`
-		Certifications          []string `json:"certifications"`
-		CertificationsFile      string   `json:"certificationsFile"`
-		PortfolioURL            string   `json:"portfolioUrl"`
-		InternetConnectionType  []string `json:"internet_connection_type"`
-		InternetConnectionSpeed []string `json:"internet_connection_speed"`
-		Timezone                string   `json:"timezone"`
-		Os                      string   `json:"os"`
-		PaidSoftware            []string `json:"paid_software"`
-		AvailableHoursPerDay    int      `json:"available_hours_perDay"`
-		CompatibleProjects      []string `json:"compatible_projects"`
-		IncompatibleProjects    []string `json:"incompatible_projects"`
-		UniversityTitles        []struct {
-			Title         string `json:"title"`
-			Status        string `json:"status"`
-			Certification string `json:"certification"`
-			NonMultiple   string `json:"non_multiple"`
-		} `json:"university_titles"`
-		PostgraduateTitles []struct {
-			Title         string `json:"title"`
-			Status        string `json:"status"`
-			Certification string `json:"certification"`
-		} `json:"postgraduate_titles"`
-		StudiesOrientation []struct {
-			Title         string `json:"title"`
-			Status        string `json:"status"`
-			Certification string `json:"certification"`
-		} `json:"studies_orientation"`
-		TertiaryStudies []struct {
-			Title         string `json:"title"`
-			Status        string `json:"status"`
-			Certification string `json:"certification"`
-		} `json:"tertiary_studies"`
+	// ============================================================== Steps 1-5 ==============================================================
+
+	// Step 1
+	UpdateEmployeeRequest struct {
+		BaseEmployeeRequest
+		EmployeeID int32 `json:"employee_id" validate:"required"`
 	}
 
-	UpdateEmployeeRequest struct {
-		Position                string   `json:"position"`
-		Role                    string   `json:"role"`
-		YearsOfExperience       string   `json:"yearsOfExperience"`
-		Certifications          string   `json:"certifications"`
-		CertificationsFile      string   `json:"certificationsFile"`
-		PortfolioURL            string   `json:"portfolioUrl"`
-		InternetConnectionType  []string `json:"internet_connection_type"`
-		InternetConnectionSpeed []string `json:"internet_connection_speed"`
-		Timezone                string   `json:"timezone"`
-		Os                      string   `json:"os"`
-		PaidSoftware            []string `json:"paid_software"`
-		AvailableHoursPerDay    int      `json:"available_hours_perDay"`
-		CompatibleProjects      []string `json:"compatible_projects"`
-		IncompatibleProjects    []string `json:"incompatible_projects"`
-		UniversityTitles        []struct {
-			Title         string `json:"title"`
-			Status        string `json:"status"`
-			Certification string `json:"certification"`
-		} `json:"university_titles"`
-		PostgraduateTitles []struct {
-			Title         string `json:"title"`
-			Status        string `json:"status"`
-			Certification string `json:"certification"`
-		} `json:"postgraduate_titles"`
-		StudiesOrientation []struct {
-			Title         string `json:"title"`
-			Status        string `json:"status"`
-			Certification string `json:"certification"`
-		} `json:"studies_orientation"`
-		TertiaryStudies []struct {
-			Title         string `json:"title"`
-			Status        string `json:"status"`
-			Certification string `json:"certification"`
-		} `json:"tertiary_studies"`
+	// Step 2
+	EmployeeInternetConnection struct {
+		InternetConnectionType  string `json:"internet_connection_type" validate:"required,oneof=fiber wifi coaxial adsl mobile"`
+		InternetConnectionSpeed string `json:"internet_connection_speed" validate:"required,oneof=less_10mb 20mb 30mb 40mb more_49mb"`
+	}
+
+	BaseEmployeeLocation struct {
+		InternetConnections []EmployeeInternetConnection `json:"internet_connections" validate:"required,min=1"`
+		Timezone            string                       `json:"timezone" validate:"required,min=2,max=100"`
+	}
+
+	CreateEmployeeLocationRequest struct {
+		BaseEmployeeLocation
+		EmployeeID int32 `json:"employee_id" validate:"required"`
+	}
+
+	// Step 3
+	BaseEmployeeTech struct {
+		Os           string   `json:"os" validate:"omitempty,min=2,max=50"`
+		PaidSoftware []string `json:"paid_software" validate:"omitempty,dive,max=50"`
+	}
+
+	CreateEmployeeTechRequest struct {
+		BaseEmployeeTech
+		EmployeeID int32 `json:"employee_id" validate:"required"`
+	}
+
+	// Step 4
+	BaseEmployeeProfileAvailability struct {
+		AvailableHoursPerDay int `json:"available_hours_per_day" validate:"required,min=1,max=8"`
+		CompatibleProjects   int `json:"compatible_projects" validate:"omitempty,min=0"`
+		IncompatibleProjects int `json:"incompatible_projects" validate:"omitempty,min=0"`
+	}
+
+	CreateEmployeeProfileAvailabilityRequest struct {
+		BaseEmployeeProfileAvailability
+		EmployeeID int32 `json:"employee_id" validate:"required"`
+	}
+
+	// Step 5
+	EmployeeEducationTitles struct {
+		Title         string `json:"title" validate:"required,min=2,max=100"`
+		Status        string `json:"status" validate:"required,oneof=completed in-progress"`
+		EducationType string `json:"education_type" validate:"required,oneof=university postgraduate studies_orientation tertiary"`
+	}
+
+	BaseEmployeeEducation struct {
+		EducationTitles []EmployeeEducationTitles `json:"education_titles"`
+	}
+
+	CreateEmployeeEducationRequest struct {
+		BaseEmployeeEducation
+		EmployeeID int32 `json:"employee_id" validate:"required"`
 	}
 )
