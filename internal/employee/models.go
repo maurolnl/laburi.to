@@ -50,6 +50,13 @@ type (
 		UpdatedAt          time.Time
 	}
 
+	Timezone struct {
+		Name      string `json:"name"`
+		Abbrev    string `json:"abbrev"`
+		UTCOffset string `json:"utc_offset"`
+		IsDST     bool   `json:"is_dst"`
+	}
+
 	// ============================================================== Steps 1-5 ==============================================================
 
 	// Step 1
@@ -60,8 +67,8 @@ type (
 
 	// Step 2
 	EmployeeInternetConnection struct {
-		InternetConnectionType  string `json:"internet_connection_type" validate:"required,oneof=fiber wifi coaxial adsl mobile"`
-		InternetConnectionSpeed string `json:"internet_connection_speed" validate:"required,oneof=less_10mb 20mb 30mb 40mb more_49mb"`
+		Type  string `json:"type" validate:"required,oneof=fiber wifi coaxial adsl mobile"`
+		Speed string `json:"speed" validate:"required,oneof=less_10mb 20mb 30mb 40mb more_50mb"`
 	}
 
 	BaseEmployeeLocation struct {
@@ -71,7 +78,6 @@ type (
 
 	CreateEmployeeLocationRequest struct {
 		BaseEmployeeLocation
-		EmployeeID int32 `json:"employee_id" validate:"required"`
 	}
 
 	// Step 3
@@ -82,7 +88,6 @@ type (
 
 	CreateEmployeeTechRequest struct {
 		BaseEmployeeTech
-		EmployeeID int32 `json:"employee_id" validate:"required"`
 	}
 
 	// Step 4
@@ -94,22 +99,21 @@ type (
 
 	CreateEmployeeProfileAvailabilityRequest struct {
 		BaseEmployeeProfileAvailability
-		EmployeeID int32 `json:"employee_id" validate:"required"`
 	}
 
 	// Step 5
 	EmployeeEducationTitles struct {
-		Title         string `json:"title" validate:"required,min=2,max=100"`
-		Status        string `json:"status" validate:"required,oneof=completed in-progress"`
-		EducationType string `json:"education_type" validate:"required,oneof=university postgraduate studies_orientation tertiary"`
+		Title         string  `json:"title" validate:"required,min=2,max=100"`
+		Status        string  `json:"status" validate:"required,oneof=completed in-progress"`
+		EducationType string  `json:"education_type" validate:"required,oneof=university postgraduate studies_orientation tertiary"`
+		Document      *string `json:"document" validate:"omitempty"`
 	}
 
 	BaseEmployeeEducation struct {
-		EducationTitles []EmployeeEducationTitles `json:"education_titles"`
+		EducationTitles []EmployeeEducationTitles `json:"education_titles" validate:"required,min=1,dive"`
 	}
 
 	CreateEmployeeEducationRequest struct {
 		BaseEmployeeEducation
-		EmployeeID int32 `json:"employee_id" validate:"required"`
 	}
 )

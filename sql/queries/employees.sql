@@ -39,11 +39,12 @@ RETURNING *;
 -- name: GetEmployeeConnection :many
 SELECT * FROM employee_internet_connections WHERE employee_id = $1;
 
+-- name: CreateEmployeeLocation :one
+INSERT INTO employee_location(employee_id, timezone, created_at, updated_at)
+VALUES($1, $2, NOW(), NOW()) RETURNING *;
+
 -- name: GetEmployeeLocation :many
 SELECT * FROM employee_location WHERE employee_id = $1;
-
--- name: GetEmployeeConnection :many
-SELECT * FROM employee_internet_connections WHERE employee_id = $1;
 
 -- name: CreateEmployeeProfileTech :one
 INSERT INTO employee_profile_tech(
@@ -104,4 +105,3 @@ INSERT INTO employee_education (
 
 -- name: GetEmployeeEducation :one
 SELECT * FROM employee_education WHERE employee_id = $1;
-

@@ -15,7 +15,11 @@ const orphanCleanupTimeout = 30 * time.Second
 type EmployeeService interface {
 	CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest, userID int32, file multipart.File, filename, contentType string, size int64) error
 	GetEmployee(ctx context.Context, ID int32) (Employee, error)
-	CreateLocation(ctx context.Context, employeeID int32) error
+	CreateLocation(ctx context.Context, employeeID int32, locationRequest CreateEmployeeLocationRequest) error
+	CreateTech(ctx context.Context, employeeID int32, techRequest CreateEmployeeTechRequest) error
+	CreateAvailability(ctx context.Context, employeeID int32, availabilityRequest CreateEmployeeProfileAvailabilityRequest) error
+	CreateEducation(ctx context.Context, employeeID int32, educationRequest CreateEmployeeEducationRequest, documents []EducationDocumentUpload) error
+	GetTimezones(ctx context.Context) ([]Timezone, error)
 }
 
 type employeeService struct {
@@ -68,14 +72,4 @@ func (s *employeeService) cleanupOrphanFile(bucket, key string) {
 
 func (s *employeeService) GetEmployee(ctx context.Context, ID int32) (Employee, error) {
 	return s.repo.GetEmployee(ctx, ID)
-}
-
-func (s *employeeService) CreateLocation(ctx context.Context, employeeID int32) error {
-	s.repo.CreateLocation(ctx, CreateEmployeeLocationRequest{
-		BaseEmployeeRequest: BaseEmployeeLocation{
-		InternetConnections []EmployeeInternetConnection `json:"internet_connections" validate:"required,min=1"`
-		Timezone            string                       `json:"timezone" validate:"required,min=2,max=100"`
-		},
-		EmployeeID: employeeID,
-	})	
 }

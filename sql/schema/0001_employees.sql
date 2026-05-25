@@ -51,7 +51,7 @@ CREATE TABLE employee_location (
 CREATE TABLE employee_profile_availability (
     id SERIAL PRIMARY KEY,
     employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
-    available_hours_per_day SMALLINT CHECK (available_hours_per_day between 0 and 8),
+    available_hours_per_day NOT NULL SMALLINT CHECK (available_hours_per_day between 0 and 8),
     compatible_projects SMALLINT,
     incompatible_projects SMALLINT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

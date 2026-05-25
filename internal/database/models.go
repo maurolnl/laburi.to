@@ -57,6 +57,14 @@ type EmployeeInternetConnection struct {
 	UpdatedAt  time.Time
 }
 
+type EmployeeLocation struct {
+	ID         int32
+	EmployeeID int32
+	Timezone   string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
 type EmployeeProfileAvailability struct {
 	ID                   int32
 	EmployeeID           int32
@@ -70,7 +78,6 @@ type EmployeeProfileAvailability struct {
 type EmployeeProfileTech struct {
 	ID           int32
 	EmployeeID   int32
-	Timezone     string
 	Os           sql.NullString
 	PaidSoftware []string
 	CreatedAt    time.Time

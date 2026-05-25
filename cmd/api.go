@@ -47,21 +47,22 @@ func (app *application) mount() http.Handler {
 	return mux
 }
 
-func (app *application) mountFeatureRoutes(mux *http.ServeMux, psqlDB *database.Queries) {
+func (app *application) mountFeatureRoutes(mux *http.ServeMux, psqlDB *sql.DB) {
 	bucket := app.config.s3Cfg.bucket
 	uploaderService := uploader.NewService(bucket, certificationsKeyPrefix)
 
 	validator := validator.New(validator.WithRequiredStructEnabled())
-	employeeHandler := employee.BuildHandlers(psqlDB, validator, uploaderService)
+	employeeRepo := employee.NewRepository(psqlDB)
+	employeeHandler := employee.BuildHandlers(employeeRepo, validator, uploaderService)
 
 	middleware := employee.MountEmployee{Middleware: app.authenticatedUserMiddleWare}
 	employee.RegisterRoutes(mux, employeeHandler, middleware)
 
-	userHandler := user.BuildHandlers(psqlDB, app.config.secretKey, validator)
+	userHandler := user.BuildHandlers(database.New(psqlDB), app.config.secretKey, validator)
 	user.RegisterRoutes(mux, userHandler)
 }
 
-func (app *application) mountDB() *database.Queries {
+func (app *application) mountDB() *sql.DB {
 	dbURL := os.Getenv("DB_URL")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
@@ -69,7 +70,7 @@ func (app *application) mountDB() *database.Queries {
 		os.Exit(1)
 	}
 
-	return database.New(db)
+	return db
 }
 
 func (app *application) run(h http.Handler) error {

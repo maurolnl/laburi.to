@@ -41,7 +41,7 @@ WITH new_employee AS (
     uploaded_at,
     updated_at
 ) SELECT id, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW(), NOW() FROM 
-  new_employee returning employee_id
+  new_employee RETURNING employee_id
 `
 
 type CreateEmployeeParams struct {
@@ -83,6 +83,186 @@ func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) 
 	return employee_id, err
 }
 
+const createEmployeeConnection = `-- name: CreateEmployeeConnection :one
+INSERT INTO employee_internet_connections(employee_id, type, speed, created_at, updated_at)
+VALUES($1, $2, $3, NOW(), NOW())
+RETURNING id, employee_id, type, speed, created_at, updated_at
+`
+
+type CreateEmployeeConnectionParams struct {
+	EmployeeID int32
+	Type       string
+	Speed      string
+}
+
+func (q *Queries) CreateEmployeeConnection(ctx context.Context, arg CreateEmployeeConnectionParams) (EmployeeInternetConnection, error) {
+	row := q.db.QueryRowContext(ctx, createEmployeeConnection, arg.EmployeeID, arg.Type, arg.Speed)
+	var i EmployeeInternetConnection
+	err := row.Scan(
+		&i.ID,
+		&i.EmployeeID,
+		&i.Type,
+		&i.Speed,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createEmployeeEducation = `-- name: CreateEmployeeEducation :one
+INSERT INTO employee_education (
+  employee_id,
+  education_type,
+  title,
+  status,
+  certification,
+  created_at,
+  updated_at
+) VALUES (
+  $1,
+  $2,
+  $3,
+  $4,
+  $5,
+  NOW(),
+  NOW()
+) RETURNING id, employee_id, education_type, title, status, certification, created_at, updated_at
+`
+
+type CreateEmployeeEducationParams struct {
+	EmployeeID    int32
+	EducationType string
+	Title         string
+	Status        string
+	Certification sql.NullString
+}
+
+func (q *Queries) CreateEmployeeEducation(ctx context.Context, arg CreateEmployeeEducationParams) (EmployeeEducation, error) {
+	row := q.db.QueryRowContext(ctx, createEmployeeEducation,
+		arg.EmployeeID,
+		arg.EducationType,
+		arg.Title,
+		arg.Status,
+		arg.Certification,
+	)
+	var i EmployeeEducation
+	err := row.Scan(
+		&i.ID,
+		&i.EmployeeID,
+		&i.EducationType,
+		&i.Title,
+		&i.Status,
+		&i.Certification,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createEmployeeLocation = `-- name: CreateEmployeeLocation :one
+INSERT INTO employee_location(employee_id, timezone, created_at, updated_at)
+VALUES($1, $2, NOW(), NOW()) RETURNING id, employee_id, timezone, created_at, updated_at
+`
+
+type CreateEmployeeLocationParams struct {
+	EmployeeID int32
+	Timezone   string
+}
+
+func (q *Queries) CreateEmployeeLocation(ctx context.Context, arg CreateEmployeeLocationParams) (EmployeeLocation, error) {
+	row := q.db.QueryRowContext(ctx, createEmployeeLocation, arg.EmployeeID, arg.Timezone)
+	var i EmployeeLocation
+	err := row.Scan(
+		&i.ID,
+		&i.EmployeeID,
+		&i.Timezone,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createEmployeeProfileAvailability = `-- name: CreateEmployeeProfileAvailability :one
+INSERT INTO employee_profile_availability (
+  employee_id,
+  available_hours_per_day,
+  compatible_projects,
+  incompatible_projects,
+  created_at,
+  updated_at
+) VALUES (
+  $1,
+  $2,
+  $3,
+  $4,
+  NOW(),
+  NOW()
+) RETURNING id, employee_id, available_hours_per_day, compatible_projects, incompatible_projects, created_at, updated_at
+`
+
+type CreateEmployeeProfileAvailabilityParams struct {
+	EmployeeID           int32
+	AvailableHoursPerDay sql.NullInt16
+	CompatibleProjects   sql.NullInt16
+	IncompatibleProjects sql.NullInt16
+}
+
+func (q *Queries) CreateEmployeeProfileAvailability(ctx context.Context, arg CreateEmployeeProfileAvailabilityParams) (EmployeeProfileAvailability, error) {
+	row := q.db.QueryRowContext(ctx, createEmployeeProfileAvailability,
+		arg.EmployeeID,
+		arg.AvailableHoursPerDay,
+		arg.CompatibleProjects,
+		arg.IncompatibleProjects,
+	)
+	var i EmployeeProfileAvailability
+	err := row.Scan(
+		&i.ID,
+		&i.EmployeeID,
+		&i.AvailableHoursPerDay,
+		&i.CompatibleProjects,
+		&i.IncompatibleProjects,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createEmployeeProfileTech = `-- name: CreateEmployeeProfileTech :one
+INSERT INTO employee_profile_tech(
+    employee_id,
+    os,
+    paid_software,
+    created_at,
+    updated_at
+) VALUES (
+  $1,
+  $2,
+  $3,
+  NOW(),
+  NOW()
+)  RETURNING id, employee_id, os, paid_software, created_at, updated_at
+`
+
+type CreateEmployeeProfileTechParams struct {
+	EmployeeID   int32
+	Os           sql.NullString
+	PaidSoftware []string
+}
+
+func (q *Queries) CreateEmployeeProfileTech(ctx context.Context, arg CreateEmployeeProfileTechParams) (EmployeeProfileTech, error) {
+	row := q.db.QueryRowContext(ctx, createEmployeeProfileTech, arg.EmployeeID, arg.Os, pq.Array(arg.PaidSoftware))
+	var i EmployeeProfileTech
+	err := row.Scan(
+		&i.ID,
+		&i.EmployeeID,
+		&i.Os,
+		pq.Array(&i.PaidSoftware),
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getEmployee = `-- name: GetEmployee :one
 SELECT employees.id, employees.position, employees.role, employees.years_of_experience, employees.certifications, employees.portfolio_url, employees.created_at, employees.updated_at, employees.user_id, users.email FROM employees JOIN users ON employees.user_id = users.id WHERE employees.id = $1
 `
@@ -114,6 +294,130 @@ func (q *Queries) GetEmployee(ctx context.Context, id int32) (GetEmployeeRow, er
 		&i.UpdatedAt,
 		&i.UserID,
 		&i.Email,
+	)
+	return i, err
+}
+
+const getEmployeeConnection = `-- name: GetEmployeeConnection :many
+SELECT id, employee_id, type, speed, created_at, updated_at FROM employee_internet_connections WHERE employee_id = $1
+`
+
+func (q *Queries) GetEmployeeConnection(ctx context.Context, employeeID int32) ([]EmployeeInternetConnection, error) {
+	rows, err := q.db.QueryContext(ctx, getEmployeeConnection, employeeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EmployeeInternetConnection
+	for rows.Next() {
+		var i EmployeeInternetConnection
+		if err := rows.Scan(
+			&i.ID,
+			&i.EmployeeID,
+			&i.Type,
+			&i.Speed,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getEmployeeEducation = `-- name: GetEmployeeEducation :one
+SELECT id, employee_id, education_type, title, status, certification, created_at, updated_at FROM employee_education WHERE employee_id = $1
+`
+
+func (q *Queries) GetEmployeeEducation(ctx context.Context, employeeID int32) (EmployeeEducation, error) {
+	row := q.db.QueryRowContext(ctx, getEmployeeEducation, employeeID)
+	var i EmployeeEducation
+	err := row.Scan(
+		&i.ID,
+		&i.EmployeeID,
+		&i.EducationType,
+		&i.Title,
+		&i.Status,
+		&i.Certification,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getEmployeeLocation = `-- name: GetEmployeeLocation :many
+SELECT id, employee_id, timezone, created_at, updated_at FROM employee_location WHERE employee_id = $1
+`
+
+func (q *Queries) GetEmployeeLocation(ctx context.Context, employeeID int32) ([]EmployeeLocation, error) {
+	rows, err := q.db.QueryContext(ctx, getEmployeeLocation, employeeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EmployeeLocation
+	for rows.Next() {
+		var i EmployeeLocation
+		if err := rows.Scan(
+			&i.ID,
+			&i.EmployeeID,
+			&i.Timezone,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getEmployeeProfileAvailability = `-- name: GetEmployeeProfileAvailability :one
+SELECT id, employee_id, available_hours_per_day, compatible_projects, incompatible_projects, created_at, updated_at FROM employee_profile_availability WHERE employee_id = $1
+`
+
+func (q *Queries) GetEmployeeProfileAvailability(ctx context.Context, employeeID int32) (EmployeeProfileAvailability, error) {
+	row := q.db.QueryRowContext(ctx, getEmployeeProfileAvailability, employeeID)
+	var i EmployeeProfileAvailability
+	err := row.Scan(
+		&i.ID,
+		&i.EmployeeID,
+		&i.AvailableHoursPerDay,
+		&i.CompatibleProjects,
+		&i.IncompatibleProjects,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getEmployeeProfileTech = `-- name: GetEmployeeProfileTech :one
+SELECT id, employee_id, os, paid_software, created_at, updated_at FROM employee_profile_tech WHERE employee_id = $1 LIMIT 1
+`
+
+func (q *Queries) GetEmployeeProfileTech(ctx context.Context, employeeID int32) (EmployeeProfileTech, error) {
+	row := q.db.QueryRowContext(ctx, getEmployeeProfileTech, employeeID)
+	var i EmployeeProfileTech
+	err := row.Scan(
+		&i.ID,
+		&i.EmployeeID,
+		&i.Os,
+		pq.Array(&i.PaidSoftware),
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

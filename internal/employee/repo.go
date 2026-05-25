@@ -8,15 +8,16 @@ import (
 )
 
 type EmployeeRepository struct {
-	db *database.Queries
+	db *sql.DB
 }
 
-func NewRepository(db *database.Queries) *EmployeeRepository {
+func NewRepository(db *sql.DB) *EmployeeRepository {
 	return &EmployeeRepository{db: db}
 }
 
 func (r *EmployeeRepository) CreateEmployee(ctx context.Context, employee CreateEmployeeRequest, userID int32, file EmployeeFileMetadata) (int32, error) {
-	employeeID, err := r.db.CreateEmployee(ctx, database.CreateEmployeeParams{
+	q := database.New(r.db)
+	employeeID, err := q.CreateEmployee(ctx, database.CreateEmployeeParams{
 		Position:          employee.Position,
 		Role:              employee.Role,
 		YearsOfExperience: string(employee.YearsOfExperience),
@@ -46,7 +47,8 @@ func (r *EmployeeRepository) CreateEmployee(ctx context.Context, employee Create
 }
 
 func (r *EmployeeRepository) GetEmployee(ctx context.Context, ID int32) (Employee, error) {
-	employee, err := r.db.GetEmployee(ctx, ID)
+	q := database.New(r.db)
+	employee, err := q.GetEmployee(ctx, ID)
 	if err != nil {
 		return Employee{}, err
 	}
@@ -62,4 +64,88 @@ func (r *EmployeeRepository) GetEmployee(ctx context.Context, ID int32) (Employe
 		CreatedAt:         employee.CreatedAt,
 		UpdatedAt:         employee.UpdatedAt,
 	}, err
+}
+
+func (r *EmployeeRepository) CreateLocationWithConnections(ctx context.Context, employeeID int32, locationRequest CreateEmployeeLocationRequest) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	qtx := database.New(r.db).WithTx(tx)
+	if err := validateTimezone(ctx, tx, locationRequest.Timezone); err != nil {
+		return err
+	}
+
+	for _, conn := range locationRequest.InternetConnections {
+		if _, err := qtx.CreateEmployeeConnection(ctx, database.CreateEmployeeConnectionParams{
+			EmployeeID: employeeID,
+			Type:       conn.Type,
+			Speed:      conn.Speed,
+		}); err != nil {
+			return err
+		}
+	}
+
+	if _, err := qtx.CreateEmployeeLocation(ctx, database.CreateEmployeeLocationParams{
+		EmployeeID: employeeID,
+		Timezone:   locationRequest.Timezone,
+	}); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (r *EmployeeRepository) GetTimezones(ctx context.Context) ([]Timezone, error) {
+	return getTimezones(ctx, r.db)
+}
+
+func validateTimezone(ctx context.Context, db database.DBTX, timezone string) error {
+	const query = `
+		SELECT EXISTS(
+			SELECT 1
+			FROM pg_timezone_names
+			WHERE name = $1
+		)
+	`
+
+	var exists bool
+	if err := db.QueryRowContext(ctx, query, timezone).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrInvalidTimezone
+	}
+
+	return nil
+}
+
+func getTimezones(ctx context.Context, db database.DBTX) ([]Timezone, error) {
+	const query = `
+		SELECT name, abbrev, utc_offset::text, is_dst
+		FROM pg_timezone_names
+		ORDER BY name
+	`
+
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	timezones := []Timezone{}
+	for rows.Next() {
+		var timezone Timezone
+		if err := rows.Scan(&timezone.Name, &timezone.Abbrev, &timezone.UTCOffset, &timezone.IsDST); err != nil {
+			return nil, err
+		}
+		timezones = append(timezones, timezone)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return timezones, nil
 }
