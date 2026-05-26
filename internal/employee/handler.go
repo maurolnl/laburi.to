@@ -8,7 +8,6 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
@@ -92,28 +91,27 @@ func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request,
 	internal.RespondWithNoBody(w, http.StatusCreated)
 }
 
-func (h *EmployeeHandler) GetEmployee(w http.ResponseWriter, r *http.Request, userID int32) {
+func (h *EmployeeHandler) GetEmployee(w http.ResponseWriter, r *http.Request, employeeID int32) {
 	defer r.Body.Close()
 
-	employeeIDPV := r.PathValue("employeeID")
-	if employeeIDPV == "" {
-		internal.RespondWithError(w, http.StatusBadRequest, ErrInvalidEmployeeRequest.Error())
-		return
-	}
-
-	employeeID, err := strconv.ParseInt(employeeIDPV, 10, 32)
-	if err != nil {
-		internal.RespondWithError(w, http.StatusBadRequest, ErrInvalidEmployeeRequest.Error())
-		return
-	}
-
-	employee, err := h.service.GetEmployee(r.Context(), int32(employeeID))
+	employee, err := h.service.GetEmployee(r.Context(), employeeID)
 	if err != nil {
 		internal.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("%s: %s", ErrEmployeeNotFound, err.Error()))
 		return
 	}
 
-	employeeResponse := GetEmployeeResponse(employee)
+	employeeResponse := GetEmployeeResponse{
+		ID:                 employee.ID,
+		Email:              employee.Email,
+		Position:           employee.Position,
+		Role:               employee.Role,
+		YearsOfExperience:  employee.YearsOfExperience,
+		Certifications:     employee.Certifications,
+		CertificationsFile: employee.CertificationsFile,
+		PortfolioURL:       employee.PortfolioURL,
+		CreatedAt:          employee.CreatedAt,
+		UpdatedAt:          employee.UpdatedAt,
+	}
 
 	internal.RespondWithJson(w, http.StatusOK, employeeResponse)
 }

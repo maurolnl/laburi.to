@@ -15,7 +15,7 @@ const (
 	ErrBadTechBody = "invalid tech request body"
 )
 
-func (h *EmployeeHandler) CreateTech(w http.ResponseWriter, r *http.Request, _ int32) {
+func (h *EmployeeHandler) CreateTech(w http.ResponseWriter, r *http.Request, employeeID int32) {
 	defer r.Body.Close()
 
 	createEmployeeTechRequest := CreateEmployeeTechRequest{}
@@ -26,17 +26,6 @@ func (h *EmployeeHandler) CreateTech(w http.ResponseWriter, r *http.Request, _ i
 
 	if err := h.validate.Struct(createEmployeeTechRequest); err != nil {
 		internal.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("%s: %s", ErrBadTechBody, err.Error()))
-		return
-	}
-
-	employeeID, err := getPathValue(r, "employeeID")
-	if err != nil {
-		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
-		return
-	}
-
-	if _, err = h.service.GetEmployee(r.Context(), employeeID); err != nil {
-		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
 		return
 	}
 

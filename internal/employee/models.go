@@ -26,6 +26,7 @@ type (
 
 	Employee struct {
 		ID                 int32
+		UserID             int32
 		Email              string
 		Position           string
 		Role               string

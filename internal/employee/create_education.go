@@ -33,7 +33,7 @@ type uploadedEducationDocument struct {
 	Key    string
 }
 
-func (h *EmployeeHandler) CreateEducation(w http.ResponseWriter, r *http.Request, _ int32) {
+func (h *EmployeeHandler) CreateEducation(w http.ResponseWriter, r *http.Request, employeeID int32) {
 	defer r.Body.Close()
 
 	contentType := r.Header.Get("Content-Type")
@@ -66,17 +66,6 @@ func (h *EmployeeHandler) CreateEducation(w http.ResponseWriter, r *http.Request
 	}
 	defer closeEducationDocuments(documents)
 
-	employeeID, err := getPathValue(r, "employeeID")
-	if err != nil {
-		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
-		return
-	}
-
-	if _, err = h.service.GetEmployee(r.Context(), employeeID); err != nil {
-		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
-		return
-	}
-
 	if err := h.service.CreateEducation(r.Context(), employeeID, createEducationRequest, documents); err != nil {
 		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
 		return
@@ -103,16 +92,14 @@ func getEducationDocumentsFromForm(r *http.Request, educationRequest CreateEmplo
 	documents := []EducationDocumentUpload{}
 
 	for i, education := range educationRequest.EducationTitles {
-		fileKeys, explicit := educationDocumentFileKeys(i, education.Document)
-		header, err := getMultipartFileHeader(r, fileKeys)
-		if err != nil {
-			return nil, err
-		}
-		if header == nil {
-			if explicit {
-				return nil, ErrInvalidFile
-			}
+		fileKey := educationDocumentFileKey(education.Document)
+		if fileKey == "" {
 			continue
+		}
+
+		header := getMultipartFileHeader(r, fileKey)
+		if header == nil {
+			return nil, ErrInvalidFile
 		}
 
 		file, err := header.Open()
@@ -143,35 +130,26 @@ func getEducationDocumentsFromForm(r *http.Request, educationRequest CreateEmplo
 	return documents, nil
 }
 
-func educationDocumentFileKeys(index int, document *string) ([]string, bool) {
-	if document != nil {
-		key := strings.TrimSpace(*document)
-		if key != "" && key != "null" {
-			return []string{key}, true
-		}
+func educationDocumentFileKey(document *string) string {
+	if document == nil {
+		return ""
 	}
 
-	return []string{
-		fmt.Sprintf("education_titles[%d][document]", index),
-		fmt.Sprintf("education_titles.%d.document", index),
-		fmt.Sprintf("documents[%d]", index),
-		fmt.Sprintf("document_%d", index),
-	}, false
+	return strings.TrimSpace(*document)
 }
 
-func getMultipartFileHeader(r *http.Request, keys []string) (*multipart.FileHeader, error) {
+func getMultipartFileHeader(r *http.Request, key string) *multipart.FileHeader {
 	if r.MultipartForm == nil || r.MultipartForm.File == nil {
-		return nil, nil
+		return nil
 	}
 
-	for _, key := range keys {
-		headers := r.MultipartForm.File[key]
-		if len(headers) > 0 {
-			return headers[0], nil
-		}
+	headers := r.MultipartForm.File[key]
+
+	if len(headers) > 0 {
+		return headers[0]
 	}
 
-	return nil, nil
+	return nil
 }
 
 func closeEducationDocuments(documents []EducationDocumentUpload) {

@@ -55,6 +55,7 @@ func (r *EmployeeRepository) GetEmployee(ctx context.Context, ID int32) (Employe
 
 	return Employee{
 		ID:                employee.ID,
+		UserID:            employee.UserID,
 		Email:             employee.Email,
 		Position:          employee.Position,
 		Role:              employee.Role,

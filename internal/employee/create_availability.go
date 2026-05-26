@@ -16,7 +16,7 @@ const (
 	ErrBadAvailabilityBody = "invalid availability request body"
 )
 
-func (h *EmployeeHandler) CreateAvailability(w http.ResponseWriter, r *http.Request, _ int32) {
+func (h *EmployeeHandler) CreateAvailability(w http.ResponseWriter, r *http.Request, employeeID int32) {
 	defer r.Body.Close()
 
 	createAvailabilityRequest := CreateEmployeeProfileAvailabilityRequest{}
@@ -27,17 +27,6 @@ func (h *EmployeeHandler) CreateAvailability(w http.ResponseWriter, r *http.Requ
 
 	if err := h.validate.Struct(createAvailabilityRequest); err != nil {
 		internal.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("%s: %s", ErrBadAvailabilityBody, err.Error()))
-		return
-	}
-
-	employeeID, err := getPathValue(r, "employeeID")
-	if err != nil {
-		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
-		return
-	}
-
-	if _, err = h.service.GetEmployee(r.Context(), employeeID); err != nil {
-		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
 		return
 	}
 
