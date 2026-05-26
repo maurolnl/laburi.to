@@ -4,14 +4,9 @@ import (
 	"net/http"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/maurolnl/bolsa-de-trabajo-back/internal"
+	"github.com/maurolnl/bolsa-de-trabajo-back/cmd/middleware"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/uploader"
 )
-
-type MountEmployee struct {
-	Middleware         internal.AuthMiddleware
-	EmployeeMiddleware internal.AuthMiddleware
-}
 
 func BuildHandlers(store EmployeeStore, validate *validator.Validate, uploader uploader.Service) *EmployeeHandler {
 	employeeService := NewService(store, uploader)
@@ -20,8 +15,8 @@ func BuildHandlers(store EmployeeStore, validate *validator.Validate, uploader u
 	return employeeHandler
 }
 
-func RegisterRoutes(mux *http.ServeMux, h *EmployeeHandler, middleware MountEmployee) {
-	mux.HandleFunc("POST /employees", middleware.Middleware(h.CreateEmployee))
+func RegisterRoutes(mux *http.ServeMux, h *EmployeeHandler) {
+	mux.HandleFunc("POST /employees", middleware.AuthenticatedUser(h.CreateEmployee))
 	mux.HandleFunc("POST /employees/{employeeID}/location", middleware.EmployeeMiddleware(h.CreateLocation))
 	mux.HandleFunc("POST /employees/{employeeID}/tech", middleware.EmployeeMiddleware(h.CreateTech))
 	mux.HandleFunc("POST /employees/{employeeID}/availability", middleware.EmployeeMiddleware(h.CreateAvailability))

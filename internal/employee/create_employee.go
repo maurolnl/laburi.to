@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/files"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/uploader"
 )
 
@@ -29,22 +30,22 @@ func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	file, header, err := getFileFromBody(r)
+	pdf, err := files.GetPDF(r, "certifications_file")
 	if err != nil {
 		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	if file != nil {
-		defer file.Close()
+	if pdf != nil {
+		defer pdf.File.Close()
 	}
 
 	var filename, fileContentType string
 	var fileSize int64
-	if header != nil {
-		filename = header.Filename
-		fileContentType = header.Header.Get("Content-Type")
-		fileSize = header.Size
+	if pdf != nil {
+		filename = pdf.Filename
+		fileContentType = pdf.ContentType
+		fileSize = pdf.Size
 	}
 
 	employeeRequest := CreateEmployeeRequest{
@@ -66,7 +67,7 @@ func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request,
 		r.Context(),
 		employeeRequest,
 		userID,
-		file,
+		pdf.File,
 		filename,
 		fileContentType,
 		fileSize,
@@ -77,38 +78,6 @@ func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request,
 	}
 
 	internal.RespondWithNoBody(w, http.StatusCreated)
-}
-
-var (
-	ErrInvalidFile         = fmt.Errorf("invalid file")
-	ErrFileTooLarge        = fmt.Errorf("file too large")
-	ErrUnsupportedFileType = fmt.Errorf("unsupported file type")
-)
-
-func getFileFromBody(r *http.Request) (multipart.File, *multipart.FileHeader, error) {
-	file, header, err := r.FormFile("certifications_file")
-	if err != nil && err != http.ErrMissingFile {
-		return nil, nil, ErrInvalidFile
-	}
-
-	if file != nil {
-		if header.Size > maxUploadSize {
-			file.Close()
-			return nil, nil, ErrFileTooLarge
-		}
-
-		contentType := header.Header.Get("Content-Type")
-
-		switch contentType {
-		case "application/pdf":
-			return file, header, nil
-		default:
-			file.Close()
-			return nil, nil, ErrUnsupportedFileType
-		}
-	}
-
-	return nil, nil, nil
 }
 
 func getCertificationsFromForm(r *http.Request) []string {

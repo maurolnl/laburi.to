@@ -56,7 +56,7 @@ func (app *application) mountFeatureRoutes(mux *http.ServeMux, psqlDB *sql.DB) {
 	employeeHandler := employee.BuildHandlers(employeeRepo, validator, uploaderService)
 
 	middleware := employee.MountEmployee{
-		Middleware:         app.authenticatedUserMiddleWare,
+		Middleware:         app.authenticatedUser,
 		EmployeeMiddleware: app.authenticatedEmployeeMiddleWare(employeeRepo),
 	}
 	employee.RegisterRoutes(mux, employeeHandler, middleware)

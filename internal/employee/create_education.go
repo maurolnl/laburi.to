@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/database"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/files"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/uploader"
 )
 
@@ -64,7 +65,6 @@ func (h *EmployeeHandler) CreateEducation(w http.ResponseWriter, r *http.Request
 		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	defer closeEducationDocuments(documents)
 
 	if err := h.service.CreateEducation(r.Context(), employeeID, createEducationRequest, documents); err != nil {
 		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
@@ -97,33 +97,19 @@ func getEducationDocumentsFromForm(r *http.Request, educationRequest CreateEmplo
 			continue
 		}
 
-		header := getMultipartFileHeader(r, fileKey)
-		if header == nil {
-			return nil, ErrInvalidFile
+		pdf, err := files.GetPDF(r, fileKey, maxUploadSize)
+		if err != nil || pdf == nil {
+			return nil, err
 		}
 
-		file, err := header.Open()
-		if err != nil {
-			return nil, ErrInvalidFile
-		}
-
-		if header.Size > maxUploadSize {
-			file.Close()
-			return nil, ErrFileTooLarge
-		}
-
-		contentType := header.Header.Get("Content-Type")
-		if contentType != "application/pdf" {
-			file.Close()
-			return nil, ErrUnsupportedFileType
-		}
+		defer pdf.File.Close()
 
 		documents = append(documents, EducationDocumentUpload{
 			Index:       i,
-			File:        file,
-			Filename:    header.Filename,
-			ContentType: contentType,
-			Size:        header.Size,
+			File:        pdf.File,
+			Filename:    pdf.Filename,
+			ContentType: pdf.ContentType,
+			Size:        pdf.Size,
 		})
 	}
 
@@ -136,26 +122,6 @@ func educationDocumentFileKey(document *string) string {
 	}
 
 	return strings.TrimSpace(*document)
-}
-
-func getMultipartFileHeader(r *http.Request, key string) *multipart.FileHeader {
-	if r.MultipartForm == nil || r.MultipartForm.File == nil {
-		return nil
-	}
-
-	headers := r.MultipartForm.File[key]
-
-	if len(headers) > 0 {
-		return headers[0]
-	}
-
-	return nil
-}
-
-func closeEducationDocuments(documents []EducationDocumentUpload) {
-	for _, document := range documents {
-		document.File.Close()
-	}
 }
 
 func (s *employeeService) CreateEducation(ctx context.Context, employeeID int32, educationRequest CreateEmployeeEducationRequest, documents []EducationDocumentUpload) error {
