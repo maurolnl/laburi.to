@@ -26,6 +26,6 @@ func RegisterRoutes(mux *http.ServeMux, h *EmployeeHandler, middleware MountEmpl
 	mux.HandleFunc("POST /employees/{employeeID}/tech", middleware.EmployeeMiddleware(h.CreateTech))
 	mux.HandleFunc("POST /employees/{employeeID}/availability", middleware.EmployeeMiddleware(h.CreateAvailability))
 	mux.HandleFunc("POST /employees/{employeeID}/education", middleware.EmployeeMiddleware(h.CreateEducation))
-	mux.HandleFunc("GET /employees/{employeeID}/education", middleware.EmployeeMiddleware(h.GetEmployee))
+	mux.HandleFunc("GET /employees/{employeeID}", middleware.EmployeeMiddleware(h.GetEmployee))
 	mux.HandleFunc("GET /timezones", middleware.Middleware(h.GetTimezones))
 }
