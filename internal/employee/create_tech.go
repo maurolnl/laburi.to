@@ -15,8 +15,14 @@ const (
 	ErrBadTechBody = "invalid tech request body"
 )
 
-func (h *EmployeeHandler) CreateTech(w http.ResponseWriter, r *http.Request, employeeID int32) {
+func (h *EmployeeHandler) CreateTech(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
+
+	employeeID, err := internal.GetPathValueAsInt(r, "employeeID")
+	if err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
+		return
+	}
 
 	createEmployeeTechRequest := CreateEmployeeTechRequest{}
 	if err := json.NewDecoder(r.Body).Decode(&createEmployeeTechRequest); err != nil {
@@ -38,6 +44,9 @@ func (h *EmployeeHandler) CreateTech(w http.ResponseWriter, r *http.Request, emp
 }
 
 func (s *employeeService) CreateTech(ctx context.Context, employeeID int32, techRequest CreateEmployeeTechRequest) error {
+	if techRequest.PaidSoftware == nil {
+		techRequest.PaidSoftware = []string{}
+	}
 	return s.repo.CreateTech(ctx, employeeID, techRequest)
 }
 

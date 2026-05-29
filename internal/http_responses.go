@@ -1,3 +1,4 @@
+// Package internal provides utility functions for handling HTTP responses, including JSON encoding and error handling.
 package internal
 
 import (
@@ -5,7 +6,7 @@ import (
 	"net/http"
 )
 
-func RespondWithJson(w http.ResponseWriter, code int, payload interface{}) error {
+func RespondWithJSON(w http.ResponseWriter, code int, payload interface{}) error {
 	response, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -21,7 +22,7 @@ func RespondWithJson(w http.ResponseWriter, code int, payload interface{}) error
 }
 
 func RespondWithError(w http.ResponseWriter, code int, msg string) {
-	RespondWithJson(w, code, map[string]string{"error": msg})
+	RespondWithJSON(w, code, map[string]string{"error": msg})
 }
 
 func RespondWithNoBody(w http.ResponseWriter, code int) {

@@ -13,20 +13,26 @@ import (
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/files"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/uploader"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/user"
 )
 
-func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request, userID int32) {
+func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
+	userID, ok := user.EmployeeIDFromContext(r.Context())
+	if !ok {
+		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
+		return
+	}
 
 	contentType := r.Header.Get("Content-Type")
 	mediaType, _, err := mime.ParseMediaType(contentType)
 	if err != nil || mediaType != "multipart/form-data" {
-		internal.RespondWithError(w, http.StatusBadRequest, "invalid multipart form")
+		internal.RespondWithError(w, http.StatusBadRequest, ErrInvalidMultiPartForm.Error())
 		return
 	}
 
 	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
-		internal.RespondWithError(w, http.StatusBadRequest, "invalid multipart form")
+		internal.RespondWithError(w, http.StatusBadRequest, ErrInvalidMultiPartForm.Error())
 		return
 	}
 

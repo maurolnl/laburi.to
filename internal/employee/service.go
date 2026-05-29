@@ -18,7 +18,6 @@ type EmployeeService interface {
 	CreateTech(ctx context.Context, employeeID int32, techRequest CreateEmployeeTechRequest) error
 	CreateAvailability(ctx context.Context, employeeID int32, availabilityRequest CreateEmployeeProfileAvailabilityRequest) error
 	CreateEducation(ctx context.Context, employeeID int32, educationRequest CreateEmployeeEducationRequest, documents []EducationDocumentUpload) error
-	GetTimezones(ctx context.Context) ([]Timezone, error)
 }
 
 type employeeService struct {

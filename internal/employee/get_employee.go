@@ -8,8 +8,14 @@ import (
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal"
 )
 
-func (h *EmployeeHandler) GetEmployee(w http.ResponseWriter, r *http.Request, employeeID int32) {
+func (h *EmployeeHandler) GetEmployee(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
+
+	employeeID, err := internal.GetPathValueAsInt(r, "employeeID")
+	if err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
+		return
+	}
 
 	employee, err := h.service.GetEmployee(r.Context(), employeeID)
 	if err != nil {
@@ -30,7 +36,7 @@ func (h *EmployeeHandler) GetEmployee(w http.ResponseWriter, r *http.Request, em
 		UpdatedAt:          employee.UpdatedAt,
 	}
 
-	internal.RespondWithJson(w, http.StatusOK, employeeResponse)
+	internal.RespondWithJSON(w, http.StatusOK, employeeResponse)
 }
 
 func (s *employeeService) GetEmployee(ctx context.Context, ID int32) (Employee, error) {

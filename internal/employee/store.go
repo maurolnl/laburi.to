@@ -9,7 +9,6 @@ type EmployeeStore interface {
 	CreateAvailability(ctx context.Context, employeeID int32, availabilityRequest CreateEmployeeProfileAvailabilityRequest) error
 	CreateEducation(ctx context.Context, employeeID int32, educationRequest CreateEmployeeEducationRequest) error
 	GetEmployee(ctx context.Context, ID int32) (Employee, error)
-	GetTimezones(ctx context.Context) ([]Timezone, error)
 }
 
 type EmployeeFileMetadata struct {

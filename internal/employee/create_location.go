@@ -9,22 +9,24 @@ import (
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal"
 )
 
-const (
-	ErrBadLocationBody = "invalid location request body"
-)
-
-func (s *EmployeeHandler) CreateLocation(w http.ResponseWriter, r *http.Request, employeeID int32) {
+func (s *EmployeeHandler) CreateLocation(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
-	createEmployeeLocationRequest := CreateEmployeeLocationRequest{}
-	err := json.NewDecoder(r.Body).Decode(&createEmployeeLocationRequest)
+	employeeID, err := internal.GetPathValueAsInt(r, "employeeID")
 	if err != nil {
-		internal.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("%s: %s", ErrBadLocationBody, err.Error()))
+		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
+		return
+	}
+
+	createEmployeeLocationRequest := CreateEmployeeLocationRequest{}
+	err = json.NewDecoder(r.Body).Decode(&createEmployeeLocationRequest)
+	if err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("%s: %s", ErrBadLocationBody.Error(), err.Error()))
 		return
 	}
 
 	if err := s.validate.Struct(createEmployeeLocationRequest); err != nil {
-		internal.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("%s: %s", ErrBadLocationBody, err.Error()))
+		internal.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("%s: %s", ErrBadLocationBody.Error(), err.Error()))
 		return
 	}
 

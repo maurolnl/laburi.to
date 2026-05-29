@@ -8,4 +8,6 @@ var (
 	ErrInvalidEmployeeRequest        = errors.New("invalid employee request")
 	ErrInvalidTimezone               = errors.New("invalid timezone")
 	ErrInternalErrorCreatingEmployee = errors.New("internal error creating employee")
+	ErrBadLocationBody               = errors.New("invalid location request body")
+	ErrInvalidMultiPartForm          = errors.New("invalid multipart form")
 )

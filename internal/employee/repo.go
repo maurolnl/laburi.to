@@ -99,10 +99,6 @@ func (r *EmployeeRepository) CreateLocationWithConnections(ctx context.Context, 
 	return tx.Commit()
 }
 
-func (r *EmployeeRepository) GetTimezones(ctx context.Context) ([]Timezone, error) {
-	return getTimezones(ctx, r.db)
-}
-
 func validateTimezone(ctx context.Context, db database.DBTX, timezone string) error {
 	const query = `
 		SELECT EXISTS(
@@ -121,32 +117,4 @@ func validateTimezone(ctx context.Context, db database.DBTX, timezone string) er
 	}
 
 	return nil
-}
-
-func getTimezones(ctx context.Context, db database.DBTX) ([]Timezone, error) {
-	const query = `
-		SELECT name, abbrev, utc_offset::text, is_dst
-		FROM pg_timezone_names
-		ORDER BY name
-	`
-
-	rows, err := db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	timezones := []Timezone{}
-	for rows.Next() {
-		var timezone Timezone
-		if err := rows.Scan(&timezone.Name, &timezone.Abbrev, &timezone.UTCOffset, &timezone.IsDST); err != nil {
-			return nil, err
-		}
-		timezones = append(timezones, timezone)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return timezones, nil
 }

@@ -16,8 +16,14 @@ const (
 	ErrBadAvailabilityBody = "invalid availability request body"
 )
 
-func (h *EmployeeHandler) CreateAvailability(w http.ResponseWriter, r *http.Request, employeeID int32) {
+func (h *EmployeeHandler) CreateAvailability(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
+
+	employeeID, err := internal.GetPathValueAsInt(r, "employeeID")
+	if err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
+		return
+	}
 
 	createAvailabilityRequest := CreateEmployeeProfileAvailabilityRequest{}
 	if err := json.NewDecoder(r.Body).Decode(&createAvailabilityRequest); err != nil {

@@ -1,11 +1,15 @@
+// Package user contains the HTTP handler logic for user-related operations, such as registration and login.
+// It defines the UserHandler struct, which has methods to handle incoming HTTP requests for user authentication.
+// The BuildHandlers function initializes
+// The UserHandler with the necessary dependencies,
+// and the RegisterRoutes function registers the appropriate routes for user authentication endpoints.
 package user
 
 import (
-	"encoding/json"
 	"net/http"
 
 	"github.com/go-playground/validator/v10"
-	"github.com/maurolnl/bolsa-de-trabajo-back/internal"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/database"
 )
 
 type UserHandler struct {
@@ -20,52 +24,15 @@ func NewHandler(userService UserService, validate *validator.Validate) *UserHand
 	}
 }
 
-func (h *UserHandler) RegisterUser(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
-	var user CreateUserReq
+func BuildHandlers(psqlDB *database.Queries, secretKey string, validate *validator.Validate) *UserHandler {
+	userRepo := NewRepository(psqlDB)
+	userService := NewService(userRepo, secretKey)
+	userHandler := NewHandler(userService, validate)
 
-	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if err := h.validate.Struct(user); err != nil {
-		internal.PrintValidatorError(w, err)
-		return
-	}
-
-	if err := h.service.SaveUser(r.Context(), user); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	internal.RespondWithNoBody(w, http.StatusOK)
+	return userHandler
 }
 
-func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
-	defer r.Body.Close()
-
-	var creds LoginUserRequest
-	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
-		http.Error(w, "Could not decode request body", http.StatusBadRequest)
-		return
-	}
-
-	if err := h.validate.Struct(creds); err != nil {
-		internal.PrintValidatorError(w, err)
-		return
-	}
-
-	userID, token, refreshToken, err := h.service.Login(r.Context(), creds.Email, creds.Password)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusUnauthorized)
-		return
-	}
-
-	internal.RespondWithJson(w, http.StatusAccepted, UserRes{
-		ID:           userID,
-		Email:        creds.Email,
-		Token:        token,
-		RefreshToken: refreshToken,
-	})
+func RegisterRoutes(mux *http.ServeMux, h *UserHandler) {
+	mux.HandleFunc("POST /auth/register", h.RegisterUser)
+	mux.HandleFunc("POST /auth/login", h.Login)
 }
