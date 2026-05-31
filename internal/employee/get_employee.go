@@ -8,16 +8,16 @@ import (
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal"
 )
 
-func (h *EmployeeHandler) GetEmployee(w http.ResponseWriter, r *http.Request) {
+func (h *EmployeeHandler) getEmployee(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
-	employeeID, err := internal.GetPathValueAsInt(r, "employeeID")
+	userID, err := internal.GetPathValueAsInt(r, "userID")
 	if err != nil {
 		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
 		return
 	}
 
-	employee, err := h.service.GetEmployee(r.Context(), employeeID)
+	employee, err := h.service.GetEmployee(r.Context(), userID)
 	if err != nil {
 		internal.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("%s: %s", ErrEmployeeNotFound, err.Error()))
 		return

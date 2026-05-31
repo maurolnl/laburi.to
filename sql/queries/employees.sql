@@ -29,7 +29,7 @@ WITH new_employee AS (
   new_employee RETURNING employee_id;
 
 -- name: GetEmployee :one
-SELECT employees.*, users.email FROM employees JOIN users ON employees.user_id = users.id WHERE employees.id = $1;
+SELECT employees.*, users.email FROM employees JOIN users ON employees.user_id = users.id WHERE users.id = $1;
 
 -- name: CreateEmployeeConnection :one 
 INSERT INTO employee_internet_connections(employee_id, type, speed, created_at, updated_at)

@@ -37,5 +37,5 @@ func RegisterRoutes(mux *http.ServeMux, h *UserHandler, secretKey string) {
 
 	mux.HandleFunc("POST /auth/register", h.RegisterUser)
 	mux.HandleFunc("POST /auth/login", h.Login)
-	mux.Handle("POST /auth/me", authMiddleware(http.HandlerFunc(h.GetCurrentUser)))
+	mux.Handle("GET /auth/me", authMiddleware(http.HandlerFunc(h.GetCurrentUser)))
 }

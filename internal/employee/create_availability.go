@@ -52,7 +52,7 @@ func (r *EmployeeRepository) CreateAvailability(ctx context.Context, employeeID 
 	q := database.New(r.db)
 	_, err := q.CreateEmployeeProfileAvailability(ctx, database.CreateEmployeeProfileAvailabilityParams{
 		EmployeeID:           employeeID,
-		AvailableHoursPerDay: intToNullInt16(availabilityRequest.AvailableHoursPerDay, true),
+		AvailableHoursPerDay: int16(availabilityRequest.AvailableHoursPerDay),
 		CompatibleProjects:   intToNullInt16(availabilityRequest.CompatibleProjects, availabilityRequest.CompatibleProjects != 0),
 		IncompatibleProjects: intToNullInt16(availabilityRequest.IncompatibleProjects, availabilityRequest.IncompatibleProjects != 0),
 	})

@@ -63,7 +63,7 @@ func (app *application) mountFeatureRoutes(mux *http.ServeMux, psqlDB *sql.DB) {
 	employee.RegisterRoutes(mux, employeeHandler, employeeRepo, app.config.secretKey)
 
 	userHandler := user.BuildHandlers(database.New(psqlDB), app.config.secretKey, validator)
-	user.RegisterRoutes(mux, userHandler)
+	user.RegisterRoutes(mux, userHandler, app.config.secretKey)
 
 	tzRepo := timezone.NewRepository(psqlDB)
 	tzService := timezone.NewService(tzRepo)

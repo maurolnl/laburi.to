@@ -264,7 +264,7 @@ func (q *Queries) CreateEmployeeProfileTech(ctx context.Context, arg CreateEmplo
 }
 
 const getEmployee = `-- name: GetEmployee :one
-SELECT employees.id, employees.position, employees.role, employees.years_of_experience, employees.certifications, employees.portfolio_url, employees.created_at, employees.updated_at, employees.user_id, users.email FROM employees JOIN users ON employees.user_id = users.id WHERE employees.id = $1
+SELECT employees.id, employees.position, employees.role, employees.years_of_experience, employees.certifications, employees.portfolio_url, employees.created_at, employees.updated_at, employees.user_id, users.email FROM employees JOIN users ON employees.user_id = users.id WHERE users.id = $1
 `
 
 type GetEmployeeRow struct {
