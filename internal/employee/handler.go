@@ -42,5 +42,5 @@ func RegisterRoutes(mux *http.ServeMux, h *EmployeeHandler, repo *EmployeeReposi
 	mux.Handle("POST /employees/{employeeID}/tech", employeeMiddlware(http.HandlerFunc(h.CreateTech)))
 	mux.Handle("POST /employees/{employeeID}/availability", employeeMiddlware(http.HandlerFunc(h.CreateAvailability)))
 	mux.Handle("POST /employees/{employeeID}/education", employeeMiddlware(http.HandlerFunc(h.CreateEducation)))
-	mux.Handle("GET /employees/{employeeID}/education", employeeMiddlware(http.HandlerFunc(h.GetEmployee)))
+	mux.Handle("GET /users/{userID}/employee", authMiddleware(http.HandlerFunc(h.GetEmployee)))
 }

@@ -1,6 +1,8 @@
 package employee
 
-import "time"
+import (
+	"time"
+)
 
 type YearsOfExperience string
 
@@ -24,31 +26,64 @@ type (
 		BaseEmployeeRequest
 	}
 
+	InternetConnection struct {
+		Type  string `json:"type"`
+		Speed string `json:"speed"`
+	}
+
+	EducationItem struct {
+		EducationType string  `json:"education_type"`
+		Title         string  `json:"title"`
+		Status        string  `json:"status"`
+		Certification *string `json:"certification,omitempty"`
+	}
+
+	FileItem struct {
+		Title string `json:"title"`
+	}
+
 	Employee struct {
-		ID                 int32
-		UserID             int32
-		Email              string
-		Position           string
-		Role               string
-		YearsOfExperience  string
-		Certifications     []string
-		CertificationsFile string
-		PortfolioURL       string
-		CreatedAt          time.Time
-		UpdatedAt          time.Time
+		ID                   int32
+		UserID               int32
+		Email                string
+		Position             string
+		Role                 string
+		YearsOfExperience    string
+		Certifications       []string
+		PortfolioURL         string
+		Timezone             string
+		Os                   string
+		PaidSoftware         []string
+		AvailableHoursPerDay int16
+		CompatibleProjects   *int16
+		IncompatibleProjects *int16
+		InternetConnections  []InternetConnection
+		Education            []EducationItem
+		Files                []FileItem
+		CreatedAt            time.Time
+		UpdatedAt            time.Time
 	}
 
 	GetEmployeeResponse struct {
-		ID                 int32
-		Email              string
-		Position           string
-		Role               string
-		YearsOfExperience  string
-		Certifications     []string
-		CertificationsFile string
-		PortfolioURL       string
-		CreatedAt          time.Time
-		UpdatedAt          time.Time
+		ID                   int32                `json:"id"`
+		UserID               int32                `json:"user_id"`
+		Email                string               `json:"email"`
+		Position             string               `json:"position"`
+		Role                 string               `json:"role"`
+		YearsOfExperience    string               `json:"years_of_experience"`
+		Certifications       []string             `json:"certifications"`
+		PortfolioURL         string               `json:"portfolio_url,omitempty"`
+		Timezone             string               `json:"timezone"`
+		Os                   string               `json:"os"`
+		PaidSoftware         []string             `json:"paid_software"`
+		AvailableHoursPerDay int16                `json:"available_hours_per_day"`
+		CompatibleProjects   *int16               `json:"compatible_projects"`
+		IncompatibleProjects *int16               `json:"incompatible_projects"`
+		InternetConnections  []InternetConnection `json:"internet_connections"`
+		Education            []EducationItem      `json:"education"`
+		Files                []FileItem           `json:"files"`
+		CreatedAt            time.Time            `json:"created_at"`
+		UpdatedAt            time.Time            `json:"updated_at"`
 	}
 
 	Timezone struct {
@@ -106,7 +141,7 @@ type (
 	EmployeeEducationTitles struct {
 		Title         string  `json:"title" validate:"required,min=2,max=100"`
 		Status        string  `json:"status" validate:"required,oneof=completed in-progress"`
-		EducationType string  `json:"type" validate:"required,oneof=university postgraduate studies-orientation tertiary"`
+		EducationType string  `json:"type" validate:"required,oneof=university postgraduate high-school-orientation tertiary"`
 		Document      *string `json:"document" validate:"omitempty"`
 	}
 

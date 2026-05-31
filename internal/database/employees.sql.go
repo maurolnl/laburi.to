@@ -264,20 +264,54 @@ func (q *Queries) CreateEmployeeProfileTech(ctx context.Context, arg CreateEmplo
 }
 
 const getEmployee = `-- name: GetEmployee :one
-SELECT employees.id, employees.position, employees.role, employees.years_of_experience, employees.certifications, employees.portfolio_url, employees.created_at, employees.updated_at, employees.user_id, users.email FROM employees JOIN users ON employees.user_id = users.id WHERE users.id = $1
+SELECT
+    employees.id,
+    employees.position,
+    employees.role,
+    employees.years_of_experience,
+    employees.certifications,
+    employees.portfolio_url,
+    employees.created_at,
+    employees.updated_at,
+    employees.user_id,
+    users.email,
+    employee_location.timezone,
+    employee_profile_tech.os,
+    employee_profile_tech.paid_software,
+    employee_profile_availability.available_hours_per_day,
+    employee_profile_availability.compatible_projects,
+    employee_profile_availability.incompatible_projects,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('type', type, 'speed', speed)) FROM employee_internet_connections WHERE employee_id = employees.id), '[]'::jsonb)::text AS internet_connections,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('education_type', education_type, 'title', title, 'status', status, 'certification', certification)) FROM employee_education WHERE employee_id = employees.id), '[]'::jsonb)::text AS education,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('title', original_filename)) FROM employee_files WHERE employee_id = employees.id), '[]'::jsonb)::text AS files
+FROM employees
+JOIN users ON employees.user_id = users.id
+LEFT JOIN employee_location ON employee_location.employee_id = employees.id
+LEFT JOIN employee_profile_tech ON employee_profile_tech.employee_id = employees.id
+LEFT JOIN employee_profile_availability ON employee_profile_availability.employee_id = employees.id
+WHERE users.id = $1
 `
 
 type GetEmployeeRow struct {
-	ID                int32
-	Position          string
-	Role              string
-	YearsOfExperience string
-	Certifications    []string
-	PortfolioUrl      sql.NullString
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	UserID            int32
-	Email             string
+	ID                   int32
+	Position             string
+	Role                 string
+	YearsOfExperience    string
+	Certifications       []string
+	PortfolioUrl         sql.NullString
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	UserID               int32
+	Email                string
+	Timezone             sql.NullString
+	Os                   sql.NullString
+	PaidSoftware         []string
+	AvailableHoursPerDay sql.NullInt16
+	CompatibleProjects   sql.NullInt16
+	IncompatibleProjects sql.NullInt16
+	InternetConnections  string
+	Education            string
+	Files                string
 }
 
 func (q *Queries) GetEmployee(ctx context.Context, id int32) (GetEmployeeRow, error) {
@@ -294,6 +328,15 @@ func (q *Queries) GetEmployee(ctx context.Context, id int32) (GetEmployeeRow, er
 		&i.UpdatedAt,
 		&i.UserID,
 		&i.Email,
+		&i.Timezone,
+		&i.Os,
+		pq.Array(&i.PaidSoftware),
+		&i.AvailableHoursPerDay,
+		&i.CompatibleProjects,
+		&i.IncompatibleProjects,
+		&i.InternetConnections,
+		&i.Education,
+		&i.Files,
 	)
 	return i, err
 }

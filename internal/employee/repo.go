@@ -3,6 +3,7 @@ package employee
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/database"
 )
@@ -46,25 +47,56 @@ func (r *EmployeeRepository) CreateEmployee(ctx context.Context, employee Create
 	return employeeID, nil
 }
 
+func nullInt16ToPtr(n sql.NullInt16) *int16 {
+	if !n.Valid {
+		return nil
+	}
+	return &n.Int16
+}
+
 func (r *EmployeeRepository) GetEmployee(ctx context.Context, ID int32) (Employee, error) {
 	q := database.New(r.db)
-	employee, err := q.GetEmployee(ctx, ID)
+	row, err := q.GetEmployee(ctx, ID)
 	if err != nil {
 		return Employee{}, err
 	}
 
+	var internetConnections []InternetConnection
+	if err := json.Unmarshal([]byte(row.InternetConnections), &internetConnections); err != nil {
+		return Employee{}, err
+	}
+
+	var education []EducationItem
+	if err := json.Unmarshal([]byte(row.Education), &education); err != nil {
+		return Employee{}, err
+	}
+
+	var files []FileItem
+	if err := json.Unmarshal([]byte(row.Files), &files); err != nil {
+		return Employee{}, err
+	}
+
 	return Employee{
-		ID:                employee.ID,
-		UserID:            employee.UserID,
-		Email:             employee.Email,
-		Position:          employee.Position,
-		Role:              employee.Role,
-		YearsOfExperience: employee.YearsOfExperience,
-		Certifications:    employee.Certifications,
-		PortfolioURL:      employee.PortfolioUrl.String,
-		CreatedAt:         employee.CreatedAt,
-		UpdatedAt:         employee.UpdatedAt,
-	}, err
+		ID:                   row.ID,
+		UserID:               row.UserID,
+		Email:                row.Email,
+		Position:             row.Position,
+		Role:                 row.Role,
+		YearsOfExperience:    row.YearsOfExperience,
+		Certifications:       row.Certifications,
+		PortfolioURL:         row.PortfolioUrl.String,
+		Timezone:             row.Timezone.String,
+		Os:                   row.Os.String,
+		PaidSoftware:         row.PaidSoftware,
+		AvailableHoursPerDay: row.AvailableHoursPerDay.Int16,
+		CompatibleProjects:   nullInt16ToPtr(row.CompatibleProjects),
+		IncompatibleProjects: nullInt16ToPtr(row.IncompatibleProjects),
+		InternetConnections:  internetConnections,
+		Education:            education,
+		Files:                files,
+		CreatedAt:            row.CreatedAt,
+		UpdatedAt:            row.UpdatedAt,
+	}, nil
 }
 
 func (r *EmployeeRepository) CreateLocationWithConnections(ctx context.Context, employeeID int32, locationRequest CreateEmployeeLocationRequest) error {
