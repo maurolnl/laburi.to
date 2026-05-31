@@ -202,7 +202,7 @@ INSERT INTO employee_profile_availability (
 
 type CreateEmployeeProfileAvailabilityParams struct {
 	EmployeeID           int32
-	AvailableHoursPerDay sql.NullInt16
+	AvailableHoursPerDay int16
 	CompatibleProjects   sql.NullInt16
 	IncompatibleProjects sql.NullInt16
 }

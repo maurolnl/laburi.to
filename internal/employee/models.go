@@ -106,7 +106,7 @@ type (
 	EmployeeEducationTitles struct {
 		Title         string  `json:"title" validate:"required,min=2,max=100"`
 		Status        string  `json:"status" validate:"required,oneof=completed in-progress"`
-		EducationType string  `json:"education_type" validate:"required,oneof=university postgraduate studies_orientation tertiary"`
+		EducationType string  `json:"type" validate:"required,oneof=university postgraduate studies-orientation tertiary"`
 		Document      *string `json:"document" validate:"omitempty"`
 	}
 

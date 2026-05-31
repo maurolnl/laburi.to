@@ -18,7 +18,7 @@ import (
 
 func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	userID, ok := user.EmployeeIDFromContext(r.Context())
+	userID, ok := user.UserIDFromContext(r.Context())
 	if !ok {
 		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
 		return

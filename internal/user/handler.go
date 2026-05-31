@@ -32,7 +32,10 @@ func BuildHandlers(psqlDB *database.Queries, secretKey string, validate *validat
 	return userHandler
 }
 
-func RegisterRoutes(mux *http.ServeMux, h *UserHandler) {
+func RegisterRoutes(mux *http.ServeMux, h *UserHandler, secretKey string) {
+	authMiddleware := AuthenticatedUser(secretKey)
+
 	mux.HandleFunc("POST /auth/register", h.RegisterUser)
 	mux.HandleFunc("POST /auth/login", h.Login)
+	mux.Handle("POST /auth/me", authMiddleware(http.HandlerFunc(h.GetCurrentUser)))
 }

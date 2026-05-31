@@ -9,6 +9,7 @@ import (
 type UserService interface {
 	SaveUser(ctx context.Context, user CreateUserReq) error
 	Login(ctx context.Context, email, password string) (int32, string, string, error)
+	GetCurrentUser(ctx context.Context, userID int32) (User, error)
 }
 
 type userService struct {

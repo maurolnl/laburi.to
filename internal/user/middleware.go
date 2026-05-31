@@ -13,9 +13,9 @@ type userIDContextKey int
 
 const userIDKey userIDContextKey = iota
 
-func EmployeeIDFromContext(ctx context.Context) (int32, bool) {
-	employeeID, ok := ctx.Value(userIDKey).(int32)
-	return employeeID, ok
+func UserIDFromContext(ctx context.Context) (int32, bool) {
+	userID, ok := ctx.Value(userIDKey).(int32)
+	return userID, ok
 }
 
 func AuthenticatedUser(secretKey string) middleware.Middleware {

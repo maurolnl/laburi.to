@@ -5,6 +5,7 @@ import (
 )
 
 var (
+	ErrUserNotFound            = errors.New("could not find user")
 	ErrEmailOrPasswordRequired = errors.New("email and password are required")
 	ErrInvalidCredentials      = errors.New("invalid credentials")
 	ErrCouldNotValidateUser    = errors.New("could not validate user credentials")
