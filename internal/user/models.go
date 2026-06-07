@@ -10,10 +10,14 @@ type (
 		Email    string `json:"email" validate:"required,email"`
 		Password string `json:"password" validate:"required,min=8"`
 	}
-	User struct {
+	LoginRes struct {
 		ID             int32
 		Email          string
 		HashedPassword string
+	}
+	User struct {
+		ID    int32
+		Email string
 	}
 	UserRes struct {
 		ID           int32  `json:"id"`

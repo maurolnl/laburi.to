@@ -7,8 +7,10 @@ import (
 	"os"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/maurolnl/bolsa-de-trabajo-back/cmd/middleware"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/database"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/employee"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/timezone"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/uploader"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/user"
 )
@@ -18,7 +20,6 @@ type application struct {
 }
 
 type s3Config struct {
-	// uploader *transfermanager.Client
 	bucket string
 }
 
@@ -44,7 +45,14 @@ func (app *application) mount() http.Handler {
 
 	app.mountFeatureRoutes(mux, psqlDB)
 
-	return mux
+	spaURL := os.Getenv("SPA_URL")
+
+	stack := middleware.CreateStack(
+		middleware.Logger,
+		middleware.CORS([]string{"http://localhost:5173", spaURL}),
+	)
+
+	return stack(mux)
 }
 
 func (app *application) mountFeatureRoutes(mux *http.ServeMux, psqlDB *sql.DB) {
@@ -55,14 +63,16 @@ func (app *application) mountFeatureRoutes(mux *http.ServeMux, psqlDB *sql.DB) {
 	employeeRepo := employee.NewRepository(psqlDB)
 	employeeHandler := employee.BuildHandlers(employeeRepo, validator, uploaderService)
 
-	middleware := employee.MountEmployee{
-		Middleware:         app.authenticatedUserMiddleWare,
-		EmployeeMiddleware: app.authenticatedEmployeeMiddleWare(employeeRepo),
-	}
-	employee.RegisterRoutes(mux, employeeHandler, middleware)
+	employee.RegisterRoutes(mux, employeeHandler, employeeRepo, app.config.secretKey)
 
 	userHandler := user.BuildHandlers(database.New(psqlDB), app.config.secretKey, validator)
-	user.RegisterRoutes(mux, userHandler)
+	user.RegisterRoutes(mux, userHandler, app.config.secretKey)
+
+	tzRepo := timezone.NewRepository(psqlDB)
+	tzService := timezone.NewService(tzRepo)
+	tzHandler := timezone.NewHandler(tzService)
+
+	tzHandler.RegisterRoutes(mux, app.config.secretKey)
 }
 
 func (app *application) mountDB() *sql.DB {

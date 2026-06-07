@@ -68,7 +68,7 @@ type EmployeeLocation struct {
 type EmployeeProfileAvailability struct {
 	ID                   int32
 	EmployeeID           int32
-	AvailableHoursPerDay sql.NullInt16
+	AvailableHoursPerDay int16
 	CompatibleProjects   sql.NullInt16
 	IncompatibleProjects sql.NullInt16
 	CreatedAt            time.Time

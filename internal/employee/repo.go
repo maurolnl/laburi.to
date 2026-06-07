@@ -3,6 +3,7 @@ package employee
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/database"
 )
@@ -15,8 +16,22 @@ func NewRepository(db *sql.DB) *EmployeeRepository {
 	return &EmployeeRepository{db: db}
 }
 
-func (r *EmployeeRepository) CreateEmployee(ctx context.Context, employee CreateEmployeeRequest, userID int32, file EmployeeFileMetadata) (int32, error) {
+func (r *EmployeeRepository) CreateEmployee(ctx context.Context, employee CreateEmployeeRequest, userID int32, file *EmployeeFileMetadata) (int32, error) {
 	q := database.New(r.db)
+	if file == nil {
+		return q.CreateEmployeeWithoutFile(ctx, database.CreateEmployeeWithoutFileParams{
+			Position:          employee.Position,
+			Role:              employee.Role,
+			YearsOfExperience: string(employee.YearsOfExperience),
+			Certifications:    employee.Certifications,
+			PortfolioUrl: sql.NullString{
+				String: employee.PortfolioURL,
+				Valid:  employee.PortfolioURL != "",
+			},
+			UserID: userID,
+		})
+	}
+
 	employeeID, err := q.CreateEmployee(ctx, database.CreateEmployeeParams{
 		Position:          employee.Position,
 		Role:              employee.Role,
@@ -46,25 +61,110 @@ func (r *EmployeeRepository) CreateEmployee(ctx context.Context, employee Create
 	return employeeID, nil
 }
 
+func (r *EmployeeRepository) UpdateEmployee(ctx context.Context, employeeID int32, employee CreateEmployeeRequest, file *EmployeeFileMetadata) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	qtx := database.New(r.db).WithTx(tx)
+	if err := qtx.UpdateEmployee(ctx, database.UpdateEmployeeParams{
+		ID:                employeeID,
+		Position:          employee.Position,
+		Role:              employee.Role,
+		YearsOfExperience: string(employee.YearsOfExperience),
+		Certifications:    employee.Certifications,
+		PortfolioUrl: sql.NullString{
+			String: employee.PortfolioURL,
+			Valid:  employee.PortfolioURL != "",
+		},
+	}); err != nil {
+		return err
+	}
+
+	if file != nil {
+		if err := qtx.CreateEmployeeFile(ctx, database.CreateEmployeeFileParams{
+			EmployeeID:       employeeID,
+			Type:             file.Type,
+			Bucket:           file.Bucket,
+			ObjectKey:        file.ObjectKey,
+			OriginalFilename: file.OriginalFilename,
+			ContentType:      file.ContentType,
+			SizeBytes:        file.SizeBytes,
+			ChecksumSha256:   sql.NullString{String: file.ChecksumSHA256, Valid: file.ChecksumSHA256 != ""},
+			Status:           file.Status,
+		}); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func nullInt16ToPtr(n sql.NullInt16) *int16 {
+	if !n.Valid {
+		return nil
+	}
+	return &n.Int16
+}
+
 func (r *EmployeeRepository) GetEmployee(ctx context.Context, ID int32) (Employee, error) {
 	q := database.New(r.db)
-	employee, err := q.GetEmployee(ctx, ID)
+	row, err := q.GetEmployee(ctx, ID)
+	if err != nil {
+		return Employee{}, err
+	}
+
+	var internetConnections []InternetConnection
+	if err := json.Unmarshal([]byte(row.InternetConnections), &internetConnections); err != nil {
+		return Employee{}, err
+	}
+
+	var education []EducationItem
+	if err := json.Unmarshal([]byte(row.Education), &education); err != nil {
+		return Employee{}, err
+	}
+
+	var files []FileItem
+	if err := json.Unmarshal([]byte(row.Files), &files); err != nil {
+		return Employee{}, err
+	}
+
+	return Employee{
+		ID:                   row.ID,
+		UserID:               row.UserID,
+		Email:                row.Email,
+		Position:             row.Position,
+		Role:                 row.Role,
+		YearsOfExperience:    row.YearsOfExperience,
+		Certifications:       row.Certifications,
+		PortfolioURL:         row.PortfolioUrl.String,
+		Timezone:             row.Timezone.String,
+		Os:                   row.Os.String,
+		PaidSoftware:         row.PaidSoftware,
+		AvailableHoursPerDay: row.AvailableHoursPerDay.Int16,
+		CompatibleProjects:   nullInt16ToPtr(row.CompatibleProjects),
+		IncompatibleProjects: nullInt16ToPtr(row.IncompatibleProjects),
+		InternetConnections:  internetConnections,
+		Education:            education,
+		Files:                files,
+		CreatedAt:            row.CreatedAt,
+		UpdatedAt:            row.UpdatedAt,
+	}, nil
+}
+
+func (r *EmployeeRepository) GetEmployeeByID(ctx context.Context, ID int32) (Employee, error) {
+	q := database.New(r.db)
+	row, err := q.GetEmployeeByID(ctx, ID)
 	if err != nil {
 		return Employee{}, err
 	}
 
 	return Employee{
-		ID:                employee.ID,
-		UserID:            employee.UserID,
-		Email:             employee.Email,
-		Position:          employee.Position,
-		Role:              employee.Role,
-		YearsOfExperience: employee.YearsOfExperience,
-		Certifications:    employee.Certifications,
-		PortfolioURL:      employee.PortfolioUrl.String,
-		CreatedAt:         employee.CreatedAt,
-		UpdatedAt:         employee.UpdatedAt,
-	}, err
+		ID:     row.ID,
+		UserID: row.UserID,
+	}, nil
 }
 
 func (r *EmployeeRepository) CreateLocationWithConnections(ctx context.Context, employeeID int32, locationRequest CreateEmployeeLocationRequest) error {
@@ -99,8 +199,40 @@ func (r *EmployeeRepository) CreateLocationWithConnections(ctx context.Context, 
 	return tx.Commit()
 }
 
-func (r *EmployeeRepository) GetTimezones(ctx context.Context) ([]Timezone, error) {
-	return getTimezones(ctx, r.db)
+func (r *EmployeeRepository) UpdateLocationWithConnections(ctx context.Context, employeeID int32, locationRequest CreateEmployeeLocationRequest) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	qtx := database.New(r.db).WithTx(tx)
+	if err := validateTimezone(ctx, tx, locationRequest.Timezone); err != nil {
+		return err
+	}
+
+	if err := qtx.DeleteEmployeeConnections(ctx, employeeID); err != nil {
+		return err
+	}
+
+	for _, conn := range locationRequest.InternetConnections {
+		if _, err := qtx.CreateEmployeeConnection(ctx, database.CreateEmployeeConnectionParams{
+			EmployeeID: employeeID,
+			Type:       conn.Type,
+			Speed:      conn.Speed,
+		}); err != nil {
+			return err
+		}
+	}
+
+	if _, err := qtx.UpsertEmployeeLocation(ctx, database.UpsertEmployeeLocationParams{
+		EmployeeID: employeeID,
+		Timezone:   locationRequest.Timezone,
+	}); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func validateTimezone(ctx context.Context, db database.DBTX, timezone string) error {
@@ -121,32 +253,4 @@ func validateTimezone(ctx context.Context, db database.DBTX, timezone string) er
 	}
 
 	return nil
-}
-
-func getTimezones(ctx context.Context, db database.DBTX) ([]Timezone, error) {
-	const query = `
-		SELECT name, abbrev, utc_offset::text, is_dst
-		FROM pg_timezone_names
-		ORDER BY name
-	`
-
-	rows, err := db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	timezones := []Timezone{}
-	for rows.Next() {
-		var timezone Timezone
-		if err := rows.Scan(&timezone.Name, &timezone.Abbrev, &timezone.UTCOffset, &timezone.IsDST); err != nil {
-			return nil, err
-		}
-		timezones = append(timezones, timezone)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return timezones, nil
 }

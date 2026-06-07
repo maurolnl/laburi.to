@@ -1,3 +1,4 @@
+// Package uploader provides a service for uploading and deleting files in an S3 bucket.
 package uploader
 
 import (

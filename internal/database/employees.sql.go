@@ -159,6 +159,63 @@ func (q *Queries) CreateEmployeeEducation(ctx context.Context, arg CreateEmploye
 	return i, err
 }
 
+const createEmployeeFile = `-- name: CreateEmployeeFile :exec
+INSERT INTO employee_files(
+  employee_id,
+  type,
+  bucket,
+  object_key,
+  original_filename,
+  content_type,
+  size_bytes,
+  checksum_sha256,
+  status,
+  created_at,
+  uploaded_at,
+  updated_at
+) VALUES (
+  $1,
+  $2,
+  $3,
+  $4,
+  $5,
+  $6,
+  $7,
+  $8,
+  $9,
+  NOW(),
+  NOW(),
+  NOW()
+)
+`
+
+type CreateEmployeeFileParams struct {
+	EmployeeID       int32
+	Type             string
+	Bucket           string
+	ObjectKey        string
+	OriginalFilename string
+	ContentType      string
+	SizeBytes        int64
+	ChecksumSha256   sql.NullString
+	Status           string
+}
+
+func (q *Queries) CreateEmployeeFile(ctx context.Context, arg CreateEmployeeFileParams) error {
+	_, err := q.db.ExecContext(ctx, createEmployeeFile,
+		arg.EmployeeID,
+		arg.Type,
+		arg.Bucket,
+		arg.ObjectKey,
+		arg.OriginalFilename,
+		arg.ContentType,
+		arg.SizeBytes,
+		arg.ChecksumSha256,
+		arg.Status,
+	)
+	return err
+}
+
 const createEmployeeLocation = `-- name: CreateEmployeeLocation :one
 INSERT INTO employee_location(employee_id, timezone, created_at, updated_at)
 VALUES($1, $2, NOW(), NOW()) RETURNING id, employee_id, timezone, created_at, updated_at
@@ -202,7 +259,7 @@ INSERT INTO employee_profile_availability (
 
 type CreateEmployeeProfileAvailabilityParams struct {
 	EmployeeID           int32
-	AvailableHoursPerDay sql.NullInt16
+	AvailableHoursPerDay int16
 	CompatibleProjects   sql.NullInt16
 	IncompatibleProjects sql.NullInt16
 }
@@ -263,21 +320,102 @@ func (q *Queries) CreateEmployeeProfileTech(ctx context.Context, arg CreateEmplo
 	return i, err
 }
 
-const getEmployee = `-- name: GetEmployee :one
-SELECT employees.id, employees.position, employees.role, employees.years_of_experience, employees.certifications, employees.portfolio_url, employees.created_at, employees.updated_at, employees.user_id, users.email FROM employees JOIN users ON employees.user_id = users.id WHERE employees.id = $1
+const createEmployeeWithoutFile = `-- name: CreateEmployeeWithoutFile :one
+INSERT INTO employees(position, role, years_of_experience, certifications, portfolio_url, user_id, created_at, updated_at)
+VALUES($1, $2, $3, $4, $5, $6, NOW(), NOW())
+RETURNING id
 `
 
-type GetEmployeeRow struct {
-	ID                int32
+type CreateEmployeeWithoutFileParams struct {
 	Position          string
 	Role              string
 	YearsOfExperience string
 	Certifications    []string
 	PortfolioUrl      sql.NullString
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
 	UserID            int32
-	Email             string
+}
+
+func (q *Queries) CreateEmployeeWithoutFile(ctx context.Context, arg CreateEmployeeWithoutFileParams) (int32, error) {
+	row := q.db.QueryRowContext(ctx, createEmployeeWithoutFile,
+		arg.Position,
+		arg.Role,
+		arg.YearsOfExperience,
+		pq.Array(arg.Certifications),
+		arg.PortfolioUrl,
+		arg.UserID,
+	)
+	var id int32
+	err := row.Scan(&id)
+	return id, err
+}
+
+const deleteEmployeeConnections = `-- name: DeleteEmployeeConnections :exec
+DELETE FROM employee_internet_connections WHERE employee_id = $1
+`
+
+func (q *Queries) DeleteEmployeeConnections(ctx context.Context, employeeID int32) error {
+	_, err := q.db.ExecContext(ctx, deleteEmployeeConnections, employeeID)
+	return err
+}
+
+const deleteEmployeeEducation = `-- name: DeleteEmployeeEducation :exec
+DELETE FROM employee_education WHERE employee_id = $1
+`
+
+func (q *Queries) DeleteEmployeeEducation(ctx context.Context, employeeID int32) error {
+	_, err := q.db.ExecContext(ctx, deleteEmployeeEducation, employeeID)
+	return err
+}
+
+const getEmployee = `-- name: GetEmployee :one
+SELECT
+    employees.id,
+    employees.position,
+    employees.role,
+    employees.years_of_experience,
+    employees.certifications,
+    employees.portfolio_url,
+    employees.created_at,
+    employees.updated_at,
+    employees.user_id,
+    users.email,
+    employee_location.timezone,
+    employee_profile_tech.os,
+    employee_profile_tech.paid_software,
+    employee_profile_availability.available_hours_per_day,
+    employee_profile_availability.compatible_projects,
+    employee_profile_availability.incompatible_projects,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('type', type, 'speed', speed)) FROM employee_internet_connections WHERE employee_id = employees.id), '[]'::jsonb)::text AS internet_connections,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('education_type', education_type, 'title', title, 'status', status, 'certification', certification)) FROM employee_education WHERE employee_id = employees.id), '[]'::jsonb)::text AS education,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('title', original_filename)) FROM employee_files WHERE employee_id = employees.id), '[]'::jsonb)::text AS files
+FROM employees
+JOIN users ON employees.user_id = users.id
+LEFT JOIN employee_location ON employee_location.employee_id = employees.id
+LEFT JOIN employee_profile_tech ON employee_profile_tech.employee_id = employees.id
+LEFT JOIN employee_profile_availability ON employee_profile_availability.employee_id = employees.id
+WHERE users.id = $1
+`
+
+type GetEmployeeRow struct {
+	ID                   int32
+	Position             string
+	Role                 string
+	YearsOfExperience    string
+	Certifications       []string
+	PortfolioUrl         sql.NullString
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	UserID               int32
+	Email                string
+	Timezone             sql.NullString
+	Os                   sql.NullString
+	PaidSoftware         []string
+	AvailableHoursPerDay sql.NullInt16
+	CompatibleProjects   sql.NullInt16
+	IncompatibleProjects sql.NullInt16
+	InternetConnections  string
+	Education            string
+	Files                string
 }
 
 func (q *Queries) GetEmployee(ctx context.Context, id int32) (GetEmployeeRow, error) {
@@ -294,7 +432,32 @@ func (q *Queries) GetEmployee(ctx context.Context, id int32) (GetEmployeeRow, er
 		&i.UpdatedAt,
 		&i.UserID,
 		&i.Email,
+		&i.Timezone,
+		&i.Os,
+		pq.Array(&i.PaidSoftware),
+		&i.AvailableHoursPerDay,
+		&i.CompatibleProjects,
+		&i.IncompatibleProjects,
+		&i.InternetConnections,
+		&i.Education,
+		&i.Files,
 	)
+	return i, err
+}
+
+const getEmployeeByID = `-- name: GetEmployeeByID :one
+SELECT id, user_id FROM employees WHERE id = $1
+`
+
+type GetEmployeeByIDRow struct {
+	ID     int32
+	UserID int32
+}
+
+func (q *Queries) GetEmployeeByID(ctx context.Context, id int32) (GetEmployeeByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getEmployeeByID, id)
+	var i GetEmployeeByIDRow
+	err := row.Scan(&i.ID, &i.UserID)
 	return i, err
 }
 
@@ -410,6 +573,161 @@ SELECT id, employee_id, os, paid_software, created_at, updated_at FROM employee_
 
 func (q *Queries) GetEmployeeProfileTech(ctx context.Context, employeeID int32) (EmployeeProfileTech, error) {
 	row := q.db.QueryRowContext(ctx, getEmployeeProfileTech, employeeID)
+	var i EmployeeProfileTech
+	err := row.Scan(
+		&i.ID,
+		&i.EmployeeID,
+		&i.Os,
+		pq.Array(&i.PaidSoftware),
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateEmployee = `-- name: UpdateEmployee :exec
+UPDATE employees
+SET
+  position = $2,
+  role = $3,
+  years_of_experience = $4,
+  certifications = $5,
+  portfolio_url = $6,
+  updated_at = NOW()
+WHERE id = $1
+`
+
+type UpdateEmployeeParams struct {
+	ID                int32
+	Position          string
+	Role              string
+	YearsOfExperience string
+	Certifications    []string
+	PortfolioUrl      sql.NullString
+}
+
+func (q *Queries) UpdateEmployee(ctx context.Context, arg UpdateEmployeeParams) error {
+	_, err := q.db.ExecContext(ctx, updateEmployee,
+		arg.ID,
+		arg.Position,
+		arg.Role,
+		arg.YearsOfExperience,
+		pq.Array(arg.Certifications),
+		arg.PortfolioUrl,
+	)
+	return err
+}
+
+const upsertEmployeeLocation = `-- name: UpsertEmployeeLocation :one
+INSERT INTO employee_location(employee_id, timezone, created_at, updated_at)
+VALUES($1, $2, NOW(), NOW())
+ON CONFLICT (employee_id) DO UPDATE
+SET
+  timezone = EXCLUDED.timezone,
+  updated_at = NOW()
+RETURNING id, employee_id, timezone, created_at, updated_at
+`
+
+type UpsertEmployeeLocationParams struct {
+	EmployeeID int32
+	Timezone   string
+}
+
+func (q *Queries) UpsertEmployeeLocation(ctx context.Context, arg UpsertEmployeeLocationParams) (EmployeeLocation, error) {
+	row := q.db.QueryRowContext(ctx, upsertEmployeeLocation, arg.EmployeeID, arg.Timezone)
+	var i EmployeeLocation
+	err := row.Scan(
+		&i.ID,
+		&i.EmployeeID,
+		&i.Timezone,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertEmployeeProfileAvailability = `-- name: UpsertEmployeeProfileAvailability :one
+INSERT INTO employee_profile_availability (
+  employee_id,
+  available_hours_per_day,
+  compatible_projects,
+  incompatible_projects,
+  created_at,
+  updated_at
+) VALUES (
+  $1,
+  $2,
+  $3,
+  $4,
+  NOW(),
+  NOW()
+)
+ON CONFLICT (employee_id) DO UPDATE
+SET
+  available_hours_per_day = EXCLUDED.available_hours_per_day,
+  compatible_projects = EXCLUDED.compatible_projects,
+  incompatible_projects = EXCLUDED.incompatible_projects,
+  updated_at = NOW()
+RETURNING id, employee_id, available_hours_per_day, compatible_projects, incompatible_projects, created_at, updated_at
+`
+
+type UpsertEmployeeProfileAvailabilityParams struct {
+	EmployeeID           int32
+	AvailableHoursPerDay int16
+	CompatibleProjects   sql.NullInt16
+	IncompatibleProjects sql.NullInt16
+}
+
+func (q *Queries) UpsertEmployeeProfileAvailability(ctx context.Context, arg UpsertEmployeeProfileAvailabilityParams) (EmployeeProfileAvailability, error) {
+	row := q.db.QueryRowContext(ctx, upsertEmployeeProfileAvailability,
+		arg.EmployeeID,
+		arg.AvailableHoursPerDay,
+		arg.CompatibleProjects,
+		arg.IncompatibleProjects,
+	)
+	var i EmployeeProfileAvailability
+	err := row.Scan(
+		&i.ID,
+		&i.EmployeeID,
+		&i.AvailableHoursPerDay,
+		&i.CompatibleProjects,
+		&i.IncompatibleProjects,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertEmployeeProfileTech = `-- name: UpsertEmployeeProfileTech :one
+INSERT INTO employee_profile_tech(
+    employee_id,
+    os,
+    paid_software,
+    created_at,
+    updated_at
+) VALUES (
+  $1,
+  $2,
+  $3,
+  NOW(),
+  NOW()
+)
+ON CONFLICT (employee_id) DO UPDATE
+SET
+  os = EXCLUDED.os,
+  paid_software = EXCLUDED.paid_software,
+  updated_at = NOW()
+RETURNING id, employee_id, os, paid_software, created_at, updated_at
+`
+
+type UpsertEmployeeProfileTechParams struct {
+	EmployeeID   int32
+	Os           sql.NullString
+	PaidSoftware []string
+}
+
+func (q *Queries) UpsertEmployeeProfileTech(ctx context.Context, arg UpsertEmployeeProfileTechParams) (EmployeeProfileTech, error) {
+	row := q.db.QueryRowContext(ctx, upsertEmployeeProfileTech, arg.EmployeeID, arg.Os, pq.Array(arg.PaidSoftware))
 	var i EmployeeProfileTech
 	err := row.Scan(
 		&i.ID,
