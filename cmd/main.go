@@ -35,13 +35,14 @@ func main() {
 }
 
 func loadEnv() {
-	if err := godotenv.Load(".env"); err != nil {
+	if err := godotenv.Load(".env"); err != nil && !os.IsNotExist(err) {
 		logErrorAndFail(err)
 	}
 }
 
 func getPort() string {
 	port := "8080"
+
 	if envPort, exists := os.LookupEnv("APP_PORT"); exists {
 		port = envPort
 	}
