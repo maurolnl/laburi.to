@@ -13,11 +13,16 @@ const orphanCleanupTimeout = 30 * time.Second
 
 type EmployeeService interface {
 	CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest, userID int32, file multipart.File, filename, contentType string, size int64) error
+	UpdateEmployee(ctx context.Context, employeeID int32, employeeReq CreateEmployeeRequest, file multipart.File, filename, contentType string, size int64) error
 	GetEmployee(ctx context.Context, ID int32) (Employee, error)
 	CreateLocation(ctx context.Context, employeeID int32, locationRequest CreateEmployeeLocationRequest) error
+	UpdateLocation(ctx context.Context, employeeID int32, locationRequest CreateEmployeeLocationRequest) error
 	CreateTech(ctx context.Context, employeeID int32, techRequest CreateEmployeeTechRequest) error
+	UpdateTech(ctx context.Context, employeeID int32, techRequest CreateEmployeeTechRequest) error
 	CreateAvailability(ctx context.Context, employeeID int32, availabilityRequest CreateEmployeeProfileAvailabilityRequest) error
+	UpdateAvailability(ctx context.Context, employeeID int32, availabilityRequest CreateEmployeeProfileAvailabilityRequest) error
 	CreateEducation(ctx context.Context, employeeID int32, educationRequest CreateEmployeeEducationRequest, documents []EducationDocumentUpload) error
+	UpdateEducation(ctx context.Context, employeeID int32, educationRequest CreateEmployeeEducationRequest, documents []EducationDocumentUpload) error
 }
 
 type employeeService struct {

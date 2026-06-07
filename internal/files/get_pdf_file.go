@@ -28,7 +28,7 @@ func GetPDF(r *http.Request, keyName string, maxSizeParam ...int64) (*PDFFile, e
 	header := getMultipartFileHeader(r, keyName)
 
 	if header == nil {
-		return nil, ErrInvalidFile
+		return nil, nil
 	}
 
 	file, err := header.Open()

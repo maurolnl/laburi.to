@@ -13,7 +13,6 @@ func RespondWithJSON(w http.ResponseWriter, code int, payload interface{}) error
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	w.WriteHeader(code)
 	w.Write(response)
@@ -27,7 +26,6 @@ func RespondWithError(w http.ResponseWriter, code int, msg string) {
 
 func RespondWithNoBody(w http.ResponseWriter, code int) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 
 	w.WriteHeader(code)
 }

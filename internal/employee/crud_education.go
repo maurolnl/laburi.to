@@ -80,6 +80,52 @@ func (h *EmployeeHandler) CreateEducation(w http.ResponseWriter, r *http.Request
 	internal.RespondWithNoBody(w, http.StatusCreated)
 }
 
+func (h *EmployeeHandler) UpdateEducation(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	employeeID, err := internal.GetPathValueAsInt(r, "employeeID")
+	if err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
+		return
+	}
+
+	contentType := r.Header.Get("Content-Type")
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil || mediaType != "multipart/form-data" {
+		internal.RespondWithError(w, http.StatusBadRequest, "invalid multipart form")
+		return
+	}
+
+	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, "invalid multipart form")
+		return
+	}
+
+	updateEducationRequest, err := getEducationRequestFromForm(r)
+	if err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("%s: %s", ErrBadEducationBody, err.Error()))
+		return
+	}
+
+	if err := h.validate.Struct(updateEducationRequest); err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("%s: %s", ErrBadEducationBody, err.Error()))
+		return
+	}
+
+	documents, err := getEducationDocumentsFromForm(r, updateEducationRequest)
+	if err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := h.service.UpdateEducation(r.Context(), employeeID, updateEducationRequest, documents); err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	internal.RespondWithNoBody(w, http.StatusOK)
+}
+
 func getEducationRequestFromForm(r *http.Request) (CreateEmployeeEducationRequest, error) {
 	var educationRequest CreateEmployeeEducationRequest
 	raw := r.FormValue("education")
@@ -159,6 +205,35 @@ func (s *employeeService) CreateEducation(ctx context.Context, employeeID int32,
 	return nil
 }
 
+func (s *employeeService) UpdateEducation(ctx context.Context, employeeID int32, educationRequest CreateEmployeeEducationRequest, documents []EducationDocumentUpload) error {
+	uploadedDocuments := []uploadedEducationDocument{}
+	for _, document := range documents {
+		out, err := s.uploader.Upload(ctx, uploader.UploadInput{
+			File:        document.File,
+			Filename:    document.Filename,
+			ContentType: document.ContentType,
+		})
+		if err != nil {
+			cleanupUploadedDocuments(s, uploadedDocuments)
+			return err
+		}
+
+		key := aws.ToString(out.Key)
+		educationRequest.EducationTitles[document.Index].Document = &key
+		uploadedDocuments = append(uploadedDocuments, uploadedEducationDocument{
+			Bucket: aws.ToString(out.Bucket),
+			Key:    key,
+		})
+	}
+
+	if err := s.repo.UpdateEducation(ctx, employeeID, educationRequest); err != nil {
+		cleanupUploadedDocuments(s, uploadedDocuments)
+		return err
+	}
+
+	return nil
+}
+
 func cleanupUploadedDocuments(s *employeeService, documents []uploadedEducationDocument) {
 	for _, document := range documents {
 		go s.cleanupOrphanFile(document.Bucket, document.Key)
@@ -173,6 +248,37 @@ func (r *EmployeeRepository) CreateEducation(ctx context.Context, employeeID int
 	defer tx.Rollback()
 
 	qtx := database.New(r.db).WithTx(tx)
+	for _, education := range educationRequest.EducationTitles {
+		_, err := qtx.CreateEmployeeEducation(ctx, database.CreateEmployeeEducationParams{
+			EmployeeID:    employeeID,
+			EducationType: education.EducationType,
+			Title:         education.Title,
+			Status:        education.Status,
+			Certification: sql.NullString{
+				String: stringValue(education.Document),
+				Valid:  education.Document != nil && strings.TrimSpace(*education.Document) != "",
+			},
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (r *EmployeeRepository) UpdateEducation(ctx context.Context, employeeID int32, educationRequest CreateEmployeeEducationRequest) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	qtx := database.New(r.db).WithTx(tx)
+	if err := qtx.DeleteEmployeeEducation(ctx, employeeID); err != nil {
+		return err
+	}
+
 	for _, education := range educationRequest.EducationTitles {
 		_, err := qtx.CreateEmployeeEducation(ctx, database.CreateEmployeeEducationParams{
 			EmployeeID:    employeeID,

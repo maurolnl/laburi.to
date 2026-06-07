@@ -45,8 +45,11 @@ func (app *application) mount() http.Handler {
 
 	app.mountFeatureRoutes(mux, psqlDB)
 
+	spaURL := os.Getenv("SPA_URL")
+
 	stack := middleware.CreateStack(
 		middleware.Logger,
+		middleware.CORS([]string{"http://localhost:5173", spaURL}),
 	)
 
 	return stack(mux)

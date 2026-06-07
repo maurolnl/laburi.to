@@ -44,13 +44,57 @@ func (h *EmployeeHandler) CreateAvailability(w http.ResponseWriter, r *http.Requ
 	internal.RespondWithNoBody(w, http.StatusCreated)
 }
 
+func (h *EmployeeHandler) UpdateAvailability(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+
+	employeeID, err := internal.GetPathValueAsInt(r, "employeeID")
+	if err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
+		return
+	}
+
+	updateAvailabilityRequest := CreateEmployeeProfileAvailabilityRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&updateAvailabilityRequest); err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("%s: %s", ErrBadAvailabilityBody, err.Error()))
+		return
+	}
+
+	if err := h.validate.Struct(updateAvailabilityRequest); err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("%s: %s", ErrBadAvailabilityBody, err.Error()))
+		return
+	}
+
+	if err := h.service.UpdateAvailability(r.Context(), employeeID, updateAvailabilityRequest); err != nil {
+		internal.RespondWithError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	internal.RespondWithNoBody(w, http.StatusOK)
+}
+
 func (s *employeeService) CreateAvailability(ctx context.Context, employeeID int32, availabilityRequest CreateEmployeeProfileAvailabilityRequest) error {
 	return s.repo.CreateAvailability(ctx, employeeID, availabilityRequest)
+}
+
+func (s *employeeService) UpdateAvailability(ctx context.Context, employeeID int32, availabilityRequest CreateEmployeeProfileAvailabilityRequest) error {
+	return s.repo.UpdateAvailability(ctx, employeeID, availabilityRequest)
 }
 
 func (r *EmployeeRepository) CreateAvailability(ctx context.Context, employeeID int32, availabilityRequest CreateEmployeeProfileAvailabilityRequest) error {
 	q := database.New(r.db)
 	_, err := q.CreateEmployeeProfileAvailability(ctx, database.CreateEmployeeProfileAvailabilityParams{
+		EmployeeID:           employeeID,
+		AvailableHoursPerDay: int16(availabilityRequest.AvailableHoursPerDay),
+		CompatibleProjects:   intToNullInt16(availabilityRequest.CompatibleProjects, availabilityRequest.CompatibleProjects != 0),
+		IncompatibleProjects: intToNullInt16(availabilityRequest.IncompatibleProjects, availabilityRequest.IncompatibleProjects != 0),
+	})
+
+	return err
+}
+
+func (r *EmployeeRepository) UpdateAvailability(ctx context.Context, employeeID int32, availabilityRequest CreateEmployeeProfileAvailabilityRequest) error {
+	q := database.New(r.db)
+	_, err := q.UpsertEmployeeProfileAvailability(ctx, database.UpsertEmployeeProfileAvailabilityParams{
 		EmployeeID:           employeeID,
 		AvailableHoursPerDay: int16(availabilityRequest.AvailableHoursPerDay),
 		CompatibleProjects:   intToNullInt16(availabilityRequest.CompatibleProjects, availabilityRequest.CompatibleProjects != 0),
