@@ -3,7 +3,6 @@ package employee
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -81,7 +80,7 @@ func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request)
 		fileSize,
 	)
 	if err != nil {
-		internal.RespondWithError(w, http.StatusInternalServerError, fmt.Sprintf("%s: %s", ErrInternalErrorCreatingEmployee.Error(), err.Error()))
+		internal.RespondWithError(w, http.StatusInternalServerError, ErrInternalErrorCreatingEmployee.Error())
 		return
 	}
 
@@ -154,7 +153,7 @@ func (h *EmployeeHandler) UpdateEmployee(w http.ResponseWriter, r *http.Request)
 		fileSize,
 	)
 	if err != nil {
-		internal.RespondWithError(w, http.StatusInternalServerError, fmt.Sprintf("%s: %s", ErrInternalErrorCreatingEmployee.Error(), err.Error()))
+		internal.RespondWithError(w, http.StatusInternalServerError, ErrInternalErrorUpdatingEmployee.Error())
 		return
 	}
 

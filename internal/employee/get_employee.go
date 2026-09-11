@@ -2,7 +2,6 @@ package employee
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal"
@@ -31,7 +30,7 @@ func (h *EmployeeHandler) GetEmployee(w http.ResponseWriter, r *http.Request) {
 
 	employee, err := h.service.GetEmployee(r.Context(), pathUserID)
 	if err != nil {
-		internal.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("%s: %s", ErrEmployeeNotFound, err.Error()))
+		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
 		return
 	}
 
