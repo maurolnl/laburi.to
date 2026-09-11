@@ -150,8 +150,11 @@ func getEducationDocumentsFromForm(r *http.Request, educationRequest CreateEmplo
 		}
 
 		pdf, err := files.GetPDF(r, fileKey, maxUploadSize)
-		if err != nil || pdf == nil {
+		if err != nil {
 			return nil, err
+		}
+		if pdf == nil {
+			return nil, files.ErrInvalidFile
 		}
 
 		defer pdf.File.Close()

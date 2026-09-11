@@ -129,8 +129,8 @@ type (
 	// Step 4
 	BaseEmployeeProfileAvailability struct {
 		AvailableHoursPerDay int `json:"available_hours_per_day" validate:"required,min=1,max=8"`
-		CompatibleProjects   int `json:"compatible_projects" validate:"omitempty,min=0"`
-		IncompatibleProjects int `json:"incompatible_projects" validate:"omitempty,min=0"`
+		CompatibleProjects   int `json:"compatible_projects" validate:"min=0,max=32767"`
+		IncompatibleProjects int `json:"incompatible_projects" validate:"min=0,max=32767"`
 	}
 
 	CreateEmployeeProfileAvailabilityRequest struct {
