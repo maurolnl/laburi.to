@@ -108,5 +108,7 @@ Para tickets iniciados mediante `/start-ticket`, crear aquí la rama indicada po
 `gitBranchName` de Linear cuando el backend esté afectado. Ejecutar
 `/opsx-propose` desde esta carpeta y detenerse para revisión antes de editar código.
 Tras aprobación explícita, commitear primero los artefactos del spec y después
-ejecutar `/opsx-apply`. Al finalizar, validar, commitear y abrir un PR contra la rama
-base real del repositorio (`main` o `master`). No archivar el cambio sin solicitud.
+ejecutar `/opsx-apply`. Al finalizar, validar la implementación y comprobar todos los
+criterios de aceptación. Después, archivar y validar el cambio OpenSpec antes de
+pushear o abrir un PR contra la rama base real (`main` o `master`); incluir el archivo
+OpenSpec resultante en los commits de la rama.
