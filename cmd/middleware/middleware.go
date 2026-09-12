@@ -40,13 +40,14 @@ func CORS(allowedOrigins []string) Middleware {
 			origin := r.Header.Get("Origin")
 			allowed := false
 			for _, o := range allowedOrigins {
-				if o == origin {
+				if o == "*" || o == origin {
 					allowed = true
 					break
 				}
 			}
 
-			if allowed {
+			if allowed && origin != "" {
+				w.Header().Add("Vary", "Origin")
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
