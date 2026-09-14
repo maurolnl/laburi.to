@@ -84,6 +84,17 @@ type EmployeeProfileTech struct {
 	UpdatedAt    time.Time
 }
 
+type Employer struct {
+	ID               int32
+	UserID           int32
+	Name             string
+	Industry         string
+	Location         string
+	HiringModalities []string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
 type RefreshToken struct {
 	Token     string
 	CreatedAt time.Time
@@ -99,4 +110,5 @@ type User struct {
 	HashedPassword string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	Role           string
 }
