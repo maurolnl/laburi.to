@@ -21,7 +21,7 @@ func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, token, refreshToken, err := h.service.Login(r.Context(), creds.Email, creds.Password)
+	userID, role, token, refreshToken, err := h.service.Login(r.Context(), creds.Email, creds.Password)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
@@ -30,6 +30,7 @@ func (h *UserHandler) Login(w http.ResponseWriter, r *http.Request) {
 	internal.RespondWithJSON(w, http.StatusAccepted, UserRes{
 		ID:           userID,
 		Email:        creds.Email,
+		Role:         role,
 		Token:        token,
 		RefreshToken: refreshToken,
 	})
