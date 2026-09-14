@@ -7,6 +7,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/auth"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/uploader"
 )
 
@@ -48,7 +49,7 @@ type fakeEmployeeService struct {
 type createEmployeeCall struct {
 	Ctx         context.Context
 	Req         CreateEmployeeRequest
-	UserID      int32
+	Principal   auth.Principal
 	File        multipart.File
 	Filename    string
 	ContentType string
@@ -90,13 +91,13 @@ type educationCall struct {
 	Documents  []EducationDocumentUpload
 }
 
-func (f *fakeEmployeeService) CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest, userID int32, file multipart.File, filename, contentType string, size int64) error {
+func (f *fakeEmployeeService) CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest, principal auth.Principal, file multipart.File, filename, contentType string, size int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.createEmployeeCalls = append(f.createEmployeeCalls, createEmployeeCall{
 		Ctx:         ctx,
 		Req:         employeeReq,
-		UserID:      userID,
+		Principal:   principal,
 		File:        file,
 		Filename:    filename,
 		ContentType: contentType,

@@ -6,13 +6,14 @@ import (
 	"mime/multipart"
 	"time"
 
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/auth"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/uploader"
 )
 
 const orphanCleanupTimeout = 30 * time.Second
 
 type EmployeeService interface {
-	CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest, userID int32, file multipart.File, filename, contentType string, size int64) error
+	CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest, principal auth.Principal, file multipart.File, filename, contentType string, size int64) error
 	UpdateEmployee(ctx context.Context, employeeID int32, employeeReq CreateEmployeeRequest, file multipart.File, filename, contentType string, size int64) error
 	GetEmployee(ctx context.Context, ID int32) (Employee, error)
 	CreateLocation(ctx context.Context, employeeID int32, locationRequest CreateEmployeeLocationRequest) error

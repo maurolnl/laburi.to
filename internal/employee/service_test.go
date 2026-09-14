@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/auth"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/user"
 )
 
 type fakeFile struct {
@@ -27,6 +30,8 @@ func newTestService(t *testing.T) (*employeeService, *fakeEmployeeStore, *fakeUp
 }
 
 func TestCreateEmployeeUploadMetadata(t *testing.T) {
+	employeePrincipal := auth.Principal{UserID: 1, Role: user.UserRoleEmployee}
+
 	tests := []struct {
 		name         string
 		file         *fakeFile
@@ -61,7 +66,7 @@ func TestCreateEmployeeUploadMetadata(t *testing.T) {
 				file = tt.file
 			}
 
-			err := service.CreateEmployee(context.Background(), req, 1, file, tt.filename, tt.contentType, tt.size)
+			err := service.CreateEmployee(context.Background(), req, employeePrincipal, file, tt.filename, tt.contentType, tt.size)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -104,14 +109,42 @@ func TestCreateEmployeeUploadMetadata(t *testing.T) {
 	}
 }
 
-func TestCreateEmployeeCleanupOnStoreFailure(t *testing.T) {
+func TestCreateEmployeeEmployerRejectedBeforeUpload(t *testing.T) {
 	service, store, upl := newTestService(t)
-	store.createEmployeeErr = errors.New("store failed")
+	employerPrincipal := auth.Principal{UserID: 1, Role: user.UserRoleEmployer}
 
 	file := newFakeFile("%PDF-1.4")
 	req := CreateEmployeeRequest{BaseEmployeeRequest: BaseEmployeeRequest{Position: "Dev", Role: "Backend", YearsOfExperience: Years2To5Y}}
 
-	err := service.CreateEmployee(context.Background(), req, 1, file, "cert.pdf", "application/pdf", 8)
+	err := service.CreateEmployee(context.Background(), req, employerPrincipal, file, "cert.pdf", "application/pdf", 8)
+	if !errors.Is(err, user.ErrProfileRoleForbidden) {
+		t.Fatalf("expected ErrProfileRoleForbidden, got %v", err)
+	}
+
+	store.mu.Lock()
+	storeCalls := len(store.createEmployeeCalls)
+	store.mu.Unlock()
+	if storeCalls != 0 {
+		t.Fatalf("expected no store call, got %d", storeCalls)
+	}
+
+	upl.mu.Lock()
+	uploadCalls := len(upl.uploadCalls)
+	upl.mu.Unlock()
+	if uploadCalls != 0 {
+		t.Fatalf("expected no upload call, got %d", uploadCalls)
+	}
+}
+
+func TestCreateEmployeeCleanupOnStoreFailure(t *testing.T) {
+	service, store, upl := newTestService(t)
+	store.createEmployeeErr = errors.New("store failed")
+	employeePrincipal := auth.Principal{UserID: 1, Role: user.UserRoleEmployee}
+
+	file := newFakeFile("%PDF-1.4")
+	req := CreateEmployeeRequest{BaseEmployeeRequest: BaseEmployeeRequest{Position: "Dev", Role: "Backend", YearsOfExperience: Years2To5Y}}
+
+	err := service.CreateEmployee(context.Background(), req, employeePrincipal, file, "cert.pdf", "application/pdf", 8)
 	if err == nil {
 		t.Fatal("expected error")
 	}
