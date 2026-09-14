@@ -39,9 +39,9 @@ func MakeRefreshToken() string {
 	return hex.EncodeToString(refreshToken)
 }
 
-func GenerateGrants(userID int32, secretKey string, ctx context.Context) (token, refreshToken string, refreshTokenExpiration time.Time, err error) {
+func GenerateGrants(userID int32, role UserRole, secretKey string, ctx context.Context) (token, refreshToken string, refreshTokenExpiration time.Time, err error) {
 	tokenExpiration := accessTokenExpirationTime
-	token, err = MakeJWT(userID, secretKey, tokenExpiration)
+	token, err = MakeJWT(userID, role, secretKey, tokenExpiration)
 	if err != nil {
 		return "", "", time.Time{}, err
 	}
