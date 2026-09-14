@@ -8,7 +8,7 @@ import (
 
 type UserService interface {
 	SaveUser(ctx context.Context, user CreateUserReq) error
-	Login(ctx context.Context, email, password string) (int32, string, string, error)
+	Login(ctx context.Context, email, password string) (int32, UserRole, string, string, error)
 	GetCurrentUser(ctx context.Context, userID int32) (User, error)
 }
 
@@ -25,6 +25,10 @@ func NewService(repo UserStore, secretKey string) UserService {
 }
 
 func (s *userService) SaveUser(ctx context.Context, user CreateUserReq) error {
+	if !user.Role.Valid() {
+		return ErrInvalidUserRole
+	}
+
 	hashedPassword, err := auth.HashPassword(user.Password)
 	if err != nil {
 		return err
@@ -35,22 +39,22 @@ func (s *userService) SaveUser(ctx context.Context, user CreateUserReq) error {
 	return err
 }
 
-func (s *userService) Login(ctx context.Context, email, password string) (int32, string, string, error) {
+func (s *userService) Login(ctx context.Context, email, password string) (int32, UserRole, string, string, error) {
 	user, err := s.repo.FindByEmail(ctx, email)
 	if err != nil {
-		return 0, "", "", err
+		return 0, "", "", "", err
 	}
 
 	match, err := auth.CheckPasswordHash(password, user.HashedPassword)
 	if err != nil {
-		return 0, "", "", ErrCouldNotValidateUser
+		return 0, "", "", "", ErrCouldNotValidateUser
 	} else if !match {
-		return 0, "", "", ErrInvalidCredentials
+		return 0, "", "", "", ErrInvalidCredentials
 	}
 
-	token, refreshToken, refreshTokenExpiration, err := auth.GenerateGrants(user.ID, s.secretKey, ctx)
+	token, refreshToken, refreshTokenExpiration, err := auth.GenerateGrants(user.ID, user.Role, s.secretKey, ctx)
 	if err != nil {
-		return 0, "", "", ErrCouldNotGenerateToken(err)
+		return 0, "", "", "", ErrCouldNotGenerateToken(err)
 	}
 
 	err = s.repo.SaveRefreshToken(ctx, SaveRefreshToken{
@@ -60,8 +64,8 @@ func (s *userService) Login(ctx context.Context, email, password string) (int32,
 	})
 
 	if err != nil {
-		return 0, "", "", err
+		return 0, "", "", "", err
 	}
 
-	return user.ID, token, refreshToken, nil
+	return user.ID, user.Role, token, refreshToken, nil
 }
