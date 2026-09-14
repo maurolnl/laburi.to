@@ -11,7 +11,7 @@ import (
 func (h *EmployeeHandler) GetEmployee(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
-	authUserID, ok := user.UserIDFromContext(r.Context())
+	principal, ok := user.PrincipalFromContext(r.Context())
 	if !ok {
 		internal.RespondWithError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -23,7 +23,7 @@ func (h *EmployeeHandler) GetEmployee(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if authUserID != pathUserID {
+	if principal.UserID != pathUserID {
 		internal.RespondWithError(w, http.StatusForbidden, "forbidden")
 		return
 	}

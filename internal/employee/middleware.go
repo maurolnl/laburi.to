@@ -29,7 +29,7 @@ func AuthenticatedEmployeeMiddleWare(cfg AuthMiddlewareCfg) middleware.Middlewar
 				return
 			}
 
-			userID, err := auth.ValidateJWT(accessToken, cfg.SecretKey)
+			principal, err := auth.ValidateJWT(accessToken, cfg.SecretKey)
 			if err != nil {
 				internal.RespondWithError(w, http.StatusUnauthorized, fmt.Sprintf("Error validating access token: %v", err))
 				return
@@ -48,7 +48,7 @@ func AuthenticatedEmployeeMiddleWare(cfg AuthMiddlewareCfg) middleware.Middlewar
 				return
 			}
 
-			if emp.UserID != userID {
+			if emp.UserID != principal.UserID {
 				internal.RespondWithError(w, http.StatusForbidden, ErrEmployeeNotFound.Error())
 				return
 			}
