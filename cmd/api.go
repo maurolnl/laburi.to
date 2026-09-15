@@ -10,6 +10,7 @@ import (
 	"github.com/maurolnl/bolsa-de-trabajo-back/cmd/middleware"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/database"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/employee"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/employer"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/timezone"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/uploader"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/user"
@@ -64,6 +65,10 @@ func (app *application) mountFeatureRoutes(mux *http.ServeMux, psqlDB *sql.DB) {
 	employeeHandler := employee.BuildHandlers(employeeRepo, validator, uploaderService)
 
 	employee.RegisterRoutes(mux, employeeHandler, employeeRepo, app.config.secretKey)
+
+	employerRepo := employer.NewRepository(psqlDB)
+	employerHandler := employer.BuildHandlers(employerRepo, validator)
+	employer.RegisterRoutes(mux, employerHandler, app.config.secretKey)
 
 	userHandler := user.BuildHandlers(database.New(psqlDB), app.config.secretKey, validator)
 	user.RegisterRoutes(mux, userHandler, app.config.secretKey)
