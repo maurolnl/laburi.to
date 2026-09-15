@@ -9,13 +9,14 @@ import (
 	"time"
 
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/auth"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/user"
 )
 
 func TestAuthenticatedEmployeeMiddleWare(t *testing.T) {
 	secret := "test-secret"
 	validToken := func(userID int32) string {
 		t.Helper()
-		tok, err := auth.MakeJWT(userID, secret, time.Hour)
+		tok, err := auth.MakeJWT(userID, user.UserRoleEmployee, secret, time.Hour)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -44,7 +45,7 @@ func TestAuthenticatedEmployeeMiddleWare(t *testing.T) {
 		},
 		{
 			name:           "invalid token signature",
-			authorization:  "Bearer " + func() string { tok, _ := auth.MakeJWT(1, "other-secret", time.Hour); return tok }(),
+			authorization:  "Bearer " + func() string { tok, _ := auth.MakeJWT(1, user.UserRoleEmployee, "other-secret", time.Hour); return tok }(),
 			employeeID:     "1",
 			getEmployee:    func(ctx context.Context, employeeID int32) (Employee, error) { return Employee{}, nil },
 			expectedStatus: http.StatusUnauthorized,

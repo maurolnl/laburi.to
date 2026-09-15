@@ -3,6 +3,7 @@ package employee
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/auth"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/files"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/uploader"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/user"
@@ -17,9 +19,9 @@ import (
 
 func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
-	userID, ok := user.UserIDFromContext(r.Context())
+	principal, ok := user.PrincipalFromContext(r.Context())
 	if !ok {
-		internal.RespondWithError(w, http.StatusBadRequest, ErrEmployeeNotFound.Error())
+		internal.RespondWithError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -73,13 +75,17 @@ func (h *EmployeeHandler) CreateEmployee(w http.ResponseWriter, r *http.Request)
 	err = h.service.CreateEmployee(
 		r.Context(),
 		employeeRequest,
-		userID,
+		principal,
 		file,
 		filename,
 		fileContentType,
 		fileSize,
 	)
 	if err != nil {
+		if errors.Is(err, user.ErrProfileRoleForbidden) {
+			internal.RespondWithError(w, http.StatusForbidden, err.Error())
+			return
+		}
 		internal.RespondWithError(w, http.StatusInternalServerError, ErrInternalErrorCreatingEmployee.Error())
 		return
 	}
@@ -180,7 +186,11 @@ func getCertificationsFromForm(r *http.Request) []string {
 	return certifications
 }
 
-func (s *employeeService) CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest, userID int32, file multipart.File, filename, contentType string, size int64) error {
+func (s *employeeService) CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest, principal auth.Principal, file multipart.File, filename, contentType string, size int64) error {
+	if err := user.AuthorizeProfileRole(principal.Role, user.UserRoleEmployee); err != nil {
+		return err
+	}
+
 	var fileMetadata *EmployeeFileMetadata
 	var uploadedBucket, uploadedKey string
 	if file != nil {
@@ -207,7 +217,7 @@ func (s *employeeService) CreateEmployee(ctx context.Context, employeeReq Create
 		}
 	}
 
-	_, err := s.repo.CreateEmployee(ctx, employeeReq, userID, fileMetadata)
+	_, err := s.repo.CreateEmployee(ctx, employeeReq, principal.UserID, fileMetadata)
 	if err != nil {
 		if fileMetadata != nil {
 			go s.cleanupOrphanFile(uploadedBucket, uploadedKey)

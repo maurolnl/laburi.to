@@ -64,13 +64,23 @@ func newTestHandler(t *testing.T) (*EmployeeHandler, *fakeEmployeeService) {
 	return NewHandler(fake, validate), fake
 }
 
-func makeToken(t *testing.T, secret string, userID int32) string {
+func makeToken(t *testing.T, secret string, userID int32, role user.UserRole) string {
 	t.Helper()
-	tok, err := auth.MakeJWT(userID, secret, time.Hour)
+	tok, err := auth.MakeJWT(userID, role, secret, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return tok
+}
+
+func makeEmployeeToken(t *testing.T, secret string, userID int32) string {
+	t.Helper()
+	return makeToken(t, secret, userID, user.UserRoleEmployee)
+}
+
+func makeEmployerToken(t *testing.T, secret string, userID int32) string {
+	t.Helper()
+	return makeToken(t, secret, userID, user.UserRoleEmployer)
 }
 
 func TestCreateEmployee(t *testing.T) {
@@ -84,7 +94,9 @@ func TestCreateEmployee(t *testing.T) {
 		expectedCode  int
 		expectCall    bool
 		expectedUser  int32
+		expectedRole  user.UserRole
 		expectedFile  bool
+		serviceErr    error
 	}{
 		{
 			name:         "missing authentication",
@@ -93,17 +105,28 @@ func TestCreateEmployee(t *testing.T) {
 			expectCall:   false,
 		},
 		{
+			name:          "employer is forbidden",
+			authorization: "Bearer " + makeEmployerToken(t, secret, 7),
+			fields:        map[string]string{"position": "Dev", "role": "Backend", "years_of_experience": string(Years2To5Y)},
+			expectedCode:  http.StatusForbidden,
+			expectCall:    true,
+			expectedUser:  7,
+			expectedRole:  user.UserRoleEmployer,
+			serviceErr:    user.ErrProfileRoleForbidden,
+		},
+		{
 			name:          "valid multipart without file",
-			authorization: "Bearer " + makeToken(t, secret, 7),
+			authorization: "Bearer " + makeEmployeeToken(t, secret, 7),
 			fields:        map[string]string{"position": "Dev", "role": "Backend", "years_of_experience": string(Years2To5Y), "certifications": `["aws"]`, "user_id": "999"},
 			expectedCode:  http.StatusCreated,
 			expectCall:    true,
 			expectedUser:  7,
+			expectedRole:  user.UserRoleEmployee,
 			expectedFile:  false,
 		},
 		{
 			name:          "valid multipart with singular certifications_file",
-			authorization: "Bearer " + makeToken(t, secret, 7),
+			authorization: "Bearer " + makeEmployeeToken(t, secret, 7),
 			fields:        map[string]string{"position": "Dev", "role": "Backend", "years_of_experience": string(Years2To5Y)},
 			files: []multipartFilePart{
 				{name: "certifications_file", filename: "cert.pdf", contentType: "application/pdf", content: "%PDF-1.4"},
@@ -111,11 +134,12 @@ func TestCreateEmployee(t *testing.T) {
 			expectedCode: http.StatusCreated,
 			expectCall:   true,
 			expectedUser: 7,
+			expectedRole: user.UserRoleEmployee,
 			expectedFile: true,
 		},
 		{
 			name:          "rejects multiple certifications_file parts",
-			authorization: "Bearer " + makeToken(t, secret, 7),
+			authorization: "Bearer " + makeEmployeeToken(t, secret, 7),
 			fields:        map[string]string{"position": "Dev", "role": "Backend", "years_of_experience": string(Years2To5Y)},
 			files: []multipartFilePart{
 				{name: "certifications_file", filename: "one.pdf", contentType: "application/pdf", content: "%PDF"},
@@ -126,7 +150,7 @@ func TestCreateEmployee(t *testing.T) {
 		},
 		{
 			name:          "rejects non-pdf file",
-			authorization: "Bearer " + makeToken(t, secret, 7),
+			authorization: "Bearer " + makeEmployeeToken(t, secret, 7),
 			fields:        map[string]string{"position": "Dev", "role": "Backend", "years_of_experience": string(Years2To5Y)},
 			files: []multipartFilePart{
 				{name: "certifications_file", filename: "cert.txt", contentType: "text/plain", content: "text"},
@@ -136,7 +160,7 @@ func TestCreateEmployee(t *testing.T) {
 		},
 		{
 			name:          "rejects PDF larger than five megabytes",
-			authorization: "Bearer " + makeToken(t, secret, 7),
+			authorization: "Bearer " + makeEmployeeToken(t, secret, 7),
 			fields:        map[string]string{"position": "Dev", "role": "Backend", "years_of_experience": string(Years2To5Y)},
 			files: []multipartFilePart{
 				{name: "certifications_file", filename: "large.pdf", contentType: "application/pdf", content: strings.Repeat("x", maxUploadSize+1)},
@@ -149,6 +173,7 @@ func TestCreateEmployee(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h, fake := newTestHandler(t)
+			fake.createEmployeeErr = tt.serviceErr
 
 			req := newEmployeeMultipartRequest(t, tt.fields, tt.files)
 			if tt.authorization != "" {
@@ -180,8 +205,11 @@ func TestCreateEmployee(t *testing.T) {
 				call := fake.createEmployeeCalls[0]
 				fake.mu.Unlock()
 
-				if call.UserID != tt.expectedUser {
-					t.Fatalf("expected userID %d, got %d", tt.expectedUser, call.UserID)
+				if call.Principal.UserID != tt.expectedUser {
+					t.Fatalf("expected userID %d, got %d", tt.expectedUser, call.Principal.UserID)
+				}
+				if call.Principal.Role != tt.expectedRole {
+					t.Fatalf("expected role %q, got %q", tt.expectedRole, call.Principal.Role)
 				}
 				if call.Req.Position != tt.fields["position"] {
 					t.Fatalf("expected position %q, got %q", tt.fields["position"], call.Req.Position)
@@ -271,7 +299,7 @@ func TestGetEmployee(t *testing.T) {
 
 			req := httptest.NewRequest("GET", "/users/"+tt.pathUserID+"/employee", nil)
 			req.SetPathValue("userID", tt.pathUserID)
-			req.Header.Set("Authorization", "Bearer "+makeToken(t, secret, tt.userID))
+			req.Header.Set("Authorization", "Bearer "+makeEmployeeToken(t, secret, tt.userID))
 			rec := httptest.NewRecorder()
 
 			user.AuthenticatedUser(secret)(http.HandlerFunc(h.GetEmployee)).ServeHTTP(rec, req)
@@ -515,7 +543,7 @@ func TestEmployeeHandlersDoNotExposeInternalErrors(t *testing.T) {
 			"role":                "Backend",
 			"years_of_experience": string(Years2To5Y),
 		}, nil)
-		req.Header.Set("Authorization", "Bearer "+makeToken(t, secret, 1))
+		req.Header.Set("Authorization", "Bearer "+makeEmployeeToken(t, secret, 1))
 		rec := httptest.NewRecorder()
 
 		user.AuthenticatedUser(secret)(http.HandlerFunc(h.CreateEmployee)).ServeHTTP(rec, req)
@@ -549,7 +577,7 @@ func TestEmployeeHandlersDoNotExposeInternalErrors(t *testing.T) {
 		fake.getEmployeeErr = errors.New(internalDetail)
 		req := httptest.NewRequest(http.MethodGet, "/users/1/employee", nil)
 		req.SetPathValue("userID", "1")
-		req.Header.Set("Authorization", "Bearer "+makeToken(t, secret, 1))
+		req.Header.Set("Authorization", "Bearer "+makeEmployeeToken(t, secret, 1))
 		rec := httptest.NewRecorder()
 
 		user.AuthenticatedUser(secret)(http.HandlerFunc(h.GetEmployee)).ServeHTTP(rec, req)

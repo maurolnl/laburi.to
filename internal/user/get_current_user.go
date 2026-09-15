@@ -8,13 +8,13 @@ import (
 )
 
 func (h *UserHandler) GetCurrentUser(w http.ResponseWriter, r *http.Request) {
-	userID, ok := UserIDFromContext(r.Context())
+	principal, ok := PrincipalFromContext(r.Context())
 	if !ok {
 		internal.RespondWithError(w, http.StatusBadRequest, ErrUserNotFound.Error())
 		return
 	}
 
-	user, err := h.service.GetCurrentUser(r.Context(), userID)
+	user, err := h.service.GetCurrentUser(r.Context(), principal.UserID)
 	if err != nil {
 		internal.RespondWithError(w, http.StatusBadRequest, ErrUserNotFound.Error())
 		return

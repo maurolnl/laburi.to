@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 var red = "\033[31m"
@@ -73,45 +75,132 @@ func TestHashingPassword(t *testing.T) {
 
 }
 
+func TestUserRoleValid(t *testing.T) {
+	tests := []struct {
+		name  string
+		role  UserRole
+		valid bool
+	}{
+		{"employee is valid", UserRoleEmployee, true},
+		{"employer is valid", UserRoleEmployer, true},
+		{"empty role is invalid", "", false},
+		{"unknown role is invalid", "admin", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.role.Valid(); got != tc.valid {
+				t.Errorf("%sFAIL expected validity %v for role %q, got %v", red, tc.valid, tc.role, got)
+			}
+		})
+	}
+}
+
+func TestMakeJWTRejectsInvalidRole(t *testing.T) {
+	_, err := MakeJWT(1, "admin", "secret", time.Hour)
+	if !errors.Is(err, ErrInvalidToken) {
+		t.Errorf("%sFAIL expected ErrInvalidToken for invalid role, got %v", red, err)
+	}
+}
+
+func TestValidateJWTRejectsMissingOrInvalidRole(t *testing.T) {
+	for _, role := range []UserRole{"", "admin"} {
+		t.Run(string(role), func(t *testing.T) {
+			claims := accessTokenClaims{
+				Role: role,
+				RegisteredClaims: jwt.RegisteredClaims{
+					Issuer:    TokenTypeAccess,
+					Subject:   "1",
+					ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+				},
+			}
+			token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte("secret"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ValidateJWT(token, "secret"); !errors.Is(err, ErrInvalidToken) {
+				t.Fatalf("expected ErrInvalidToken for role %q, got %v", role, err)
+			}
+		})
+	}
+}
+
 func TestJWTValidation(t *testing.T) {
 	secret := "secret"
 	expiresIn := time.Hour
 
 	tests := []struct {
-		name      string
-		userID    int32
-		secret    string
-		expiresIn time.Duration
-		wantErr   bool
+		name           string
+		userID         int32
+		role           UserRole
+		secret         string
+		validateSecret string
+		expiresIn      time.Duration
+		wantErr        bool
 	}{
 		{
-			name:      "valid token",
-			userID:    0,
-			secret:    secret,
-			expiresIn: expiresIn,
-			wantErr:   false,
+			name:           "valid employee token",
+			userID:         0,
+			role:           UserRoleEmployee,
+			secret:         secret,
+			validateSecret: secret,
+			expiresIn:      expiresIn,
+			wantErr:        false,
 		},
 		{
-			name:      "invalid token",
-			userID:    1,
-			secret:    "wrongSecret",
-			expiresIn: expiresIn,
-			wantErr:   true,
+			name:           "valid employer token",
+			userID:         42,
+			role:           UserRoleEmployer,
+			secret:         secret,
+			validateSecret: secret,
+			expiresIn:      expiresIn,
+			wantErr:        false,
+		},
+		{
+			name:           "invalid token signature",
+			userID:         1,
+			role:           UserRoleEmployee,
+			secret:         "wrongSecret",
+			validateSecret: secret,
+			expiresIn:      expiresIn,
+			wantErr:        true,
+		},
+		{
+			name:           "invalid token role rejected",
+			userID:         1,
+			role:           "admin",
+			secret:         secret,
+			validateSecret: secret,
+			expiresIn:      expiresIn,
+			wantErr:        true,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			token, err := MakeJWT(tc.userID, tc.secret, tc.expiresIn)
+			token, err := MakeJWT(tc.userID, tc.role, tc.secret, tc.expiresIn)
 			if err != nil {
 				if !tc.wantErr {
 					t.Errorf("%sFAIL error generating token, err: %#v", red, err)
 				}
 				return
 			}
-			_, err = ValidateJWT(token, tc.secret)
+			principal, err := ValidateJWT(token, tc.validateSecret)
 			if err != nil {
-				t.Errorf("%sFAIL error validating token, err: %#v", red, err)
+				if !tc.wantErr {
+					t.Errorf("%sFAIL error validating token, err: %#v", red, err)
+				}
+				return
+			}
+			if tc.wantErr {
+				t.Errorf("%sFAIL expected validation error", red)
+				return
+			}
+			if principal.UserID != tc.userID {
+				t.Errorf("%sFAIL expected userID %d, got %d", red, tc.userID, principal.UserID)
+			}
+			if principal.Role != tc.role {
+				t.Errorf("%sFAIL expected role %q, got %q", red, tc.role, principal.Role)
 			}
 		})
 	}

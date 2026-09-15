@@ -9,13 +9,13 @@ import (
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/auth"
 )
 
-type userIDContextKey int
+type principalContextKey int
 
-const userIDKey userIDContextKey = iota
+const principalKey principalContextKey = iota
 
-func UserIDFromContext(ctx context.Context) (int32, bool) {
-	userID, ok := ctx.Value(userIDKey).(int32)
-	return userID, ok
+func PrincipalFromContext(ctx context.Context) (auth.Principal, bool) {
+	principal, ok := ctx.Value(principalKey).(auth.Principal)
+	return principal, ok && principal.Role.Valid()
 }
 
 func AuthenticatedUser(secretKey string) middleware.Middleware {
@@ -27,13 +27,13 @@ func AuthenticatedUser(secretKey string) middleware.Middleware {
 				return
 			}
 
-			userID, err := auth.ValidateJWT(accessToken, secretKey)
+			principal, err := auth.ValidateJWT(accessToken, secretKey)
 			if err != nil {
 				internal.RespondWithError(w, http.StatusUnauthorized, err.Error())
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), userIDKey, userID)
+			ctx := context.WithValue(r.Context(), principalKey, principal)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

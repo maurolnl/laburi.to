@@ -20,15 +20,43 @@ var (
 	ErrCannotValidate = errors.New("cannot validate token")
 )
 
-func MakeJWT(userID int32, tokenSecret string, expiresIn time.Duration) (string, error) {
+type UserRole string
+
+const (
+	UserRoleEmployee UserRole = "employee"
+	UserRoleEmployer UserRole = "employer"
+)
+
+type Principal struct {
+	UserID int32
+	Role   UserRole
+}
+
+func (r UserRole) Valid() bool {
+	return r == UserRoleEmployee || r == UserRoleEmployer
+}
+
+type accessTokenClaims struct {
+	Role UserRole `json:"role"`
+	jwt.RegisteredClaims
+}
+
+func MakeJWT(userID int32, role UserRole, tokenSecret string, expiresIn time.Duration) (string, error) {
+	if !role.Valid() {
+		return "", ErrInvalidToken
+	}
+
 	now := time.Now().UTC()
 	expiration := now.Add(expiresIn)
 
-	claims := jwt.RegisteredClaims{
-		Issuer:    TokenTypeAccess,
-		IssuedAt:  jwt.NewNumericDate(now),
-		ExpiresAt: jwt.NewNumericDate(expiration),
-		Subject:   strconv.Itoa(int(userID)),
+	claims := accessTokenClaims{
+		Role: role,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    TokenTypeAccess,
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(expiration),
+			Subject:   strconv.Itoa(int(userID)),
+		},
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -36,7 +64,7 @@ func MakeJWT(userID int32, tokenSecret string, expiresIn time.Duration) (string,
 	return token.SignedString([]byte(tokenSecret))
 }
 
-func ValidateJWT(tokenString, tokenSecret string) (int32, error) {
+func ValidateJWT(tokenString, tokenSecret string) (Principal, error) {
 	// We declare an empty RegisteredClaims struct
 	// and pass it to ParseWithClaims to populate it with the token's claims
 	// once is decoded inside the ParseWithClaims function.
@@ -44,7 +72,7 @@ func ValidateJWT(tokenString, tokenSecret string) (int32, error) {
 	// and is used to store the claims of a JWT token.
 	// We need to pass a pointer so the function know
 	// which struct type has to fill.
-	claims := &jwt.RegisteredClaims{}
+	claims := &accessTokenClaims{}
 
 	_, err := jwt.ParseWithClaims(
 		tokenString,
@@ -58,15 +86,18 @@ func ValidateJWT(tokenString, tokenSecret string) (int32, error) {
 		jwt.WithIssuer(TokenTypeAccess),
 	)
 	if err != nil {
-		return 0, err
+		return Principal{}, err
+	}
+	if !claims.Role.Valid() {
+		return Principal{}, ErrInvalidToken
 	}
 
 	userID, err := strconv.ParseInt(claims.Subject, 10, 32)
 	if err != nil {
-		return 0, err
+		return Principal{}, err
 	}
 
-	return int32(userID), nil
+	return Principal{UserID: int32(userID), Role: claims.Role}, nil
 }
 
 func GetBearerToken(headers http.Header) (string, error) {

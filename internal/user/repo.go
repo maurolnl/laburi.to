@@ -19,6 +19,7 @@ func (r *UserRepository) Save(ctx context.Context, user CreateUserReq) error {
 	_, err := r.db.CreateUser(ctx, database.CreateUserParams{
 		Email:          user.Email,
 		HashedPassword: user.Password,
+		Role:           string(user.Role),
 	})
 	return err
 }
@@ -28,10 +29,15 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (LoginRe
 	if err != nil {
 		return LoginRes{}, err
 	}
+	role := UserRole(user.Role)
+	if !role.Valid() {
+		return LoginRes{}, ErrInvalidUserRole
+	}
 	return LoginRes{
 		ID:             user.ID,
 		Email:          user.Email,
 		HashedPassword: user.HashedPassword,
+		Role:           role,
 	}, nil
 }
 
@@ -51,8 +57,13 @@ func (r *UserRepository) GetCurrentUser(ctx context.Context, userID int32) (User
 	if err != nil {
 		return User{}, err
 	}
+	role := UserRole(user.Role)
+	if !role.Valid() {
+		return User{}, ErrInvalidUserRole
+	}
 	return User{
 		ID:    user.ID,
 		Email: user.Email,
+		Role:  role,
 	}, nil
 }
