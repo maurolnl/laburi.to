@@ -95,6 +95,21 @@ type Employer struct {
 	UpdatedAt        time.Time
 }
 
+type JobPosition struct {
+	ID                     int32
+	EmployerID             int32
+	Position               string
+	Role                   string
+	RequiredExperience     string
+	RequiredEducationLevel string
+	AvailableHoursPerDay   int16
+	Timezone               string
+	TechnicalResources     []string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	DeletedAt              sql.NullTime
+}
+
 type RefreshToken struct {
 	Token     string
 	CreatedAt time.Time
