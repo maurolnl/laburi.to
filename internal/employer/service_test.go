@@ -40,7 +40,7 @@ func (f *fakeEmployerStore) GetEmployerByUserID(ctx context.Context, userID int3
 }
 
 func TestEmployerServiceCreateEmployer(t *testing.T) {
-	request := CreateEmployerRequest{Name: "Acme", Industry: "Software", Location: "Remote", HiringModalities: []string{}}
+	request := newTestCreateEmployerRequest(withTestEmployerModalities(nil))
 	ctx := context.WithValue(context.Background(), struct{}{}, "request-context")
 	tests := []struct {
 		name          string
@@ -49,11 +49,11 @@ func TestEmployerServiceCreateEmployer(t *testing.T) {
 		wantErr       error
 		wantStoreCall bool
 	}{
-		{name: "success", principal: auth.Principal{UserID: 42, Role: user.UserRoleEmployer}, wantStoreCall: true},
-		{name: "employee role", principal: auth.Principal{UserID: 42, Role: user.UserRoleEmployee}, wantErr: user.ErrProfileRoleForbidden},
-		{name: "duplicate", principal: auth.Principal{UserID: 42, Role: user.UserRoleEmployer}, storeErr: ErrEmployerAlreadyExists, wantErr: ErrEmployerAlreadyExists, wantStoreCall: true},
-		{name: "incompatible profile", principal: auth.Principal{UserID: 42, Role: user.UserRoleEmployer}, storeErr: ErrEmployerProfileConflict, wantErr: ErrEmployerProfileConflict, wantStoreCall: true},
-		{name: "internal", principal: auth.Principal{UserID: 42, Role: user.UserRoleEmployer}, storeErr: errors.New("database unavailable"), wantStoreCall: true},
+		{name: "success", principal: newTestEmployerPrincipal(), wantStoreCall: true},
+		{name: "employee role", principal: newTestEmployerPrincipal(withTestEmployerRole(user.UserRoleEmployee)), wantErr: user.ErrProfileRoleForbidden},
+		{name: "duplicate", principal: newTestEmployerPrincipal(), storeErr: ErrEmployerAlreadyExists, wantErr: ErrEmployerAlreadyExists, wantStoreCall: true},
+		{name: "incompatible profile", principal: newTestEmployerPrincipal(), storeErr: ErrEmployerProfileConflict, wantErr: ErrEmployerProfileConflict, wantStoreCall: true},
+		{name: "internal", principal: newTestEmployerPrincipal(), storeErr: errors.New("database unavailable"), wantStoreCall: true},
 	}
 
 	for _, tt := range tests {
@@ -100,10 +100,10 @@ func TestEmployerServiceGetEmployer(t *testing.T) {
 		wantErr       error
 		wantStoreCall bool
 	}{
-		{name: "success", principal: auth.Principal{UserID: 42, Role: user.UserRoleEmployer}, storeResult: Employer{ID: 7, UserID: 42}, wantStoreCall: true},
-		{name: "employee role", principal: auth.Principal{UserID: 42, Role: user.UserRoleEmployee}, wantErr: user.ErrProfileRoleForbidden},
-		{name: "not found", principal: auth.Principal{UserID: 42, Role: user.UserRoleEmployer}, storeErr: ErrEmployerNotFound, wantErr: ErrEmployerNotFound, wantStoreCall: true},
-		{name: "internal", principal: auth.Principal{UserID: 42, Role: user.UserRoleEmployer}, storeErr: internalErr, wantErr: internalErr, wantStoreCall: true},
+		{name: "success", principal: newTestEmployerPrincipal(), storeResult: newTestEmployer(), wantStoreCall: true},
+		{name: "employee role", principal: newTestEmployerPrincipal(withTestEmployerRole(user.UserRoleEmployee)), wantErr: user.ErrProfileRoleForbidden},
+		{name: "not found", principal: newTestEmployerPrincipal(), storeErr: ErrEmployerNotFound, wantErr: ErrEmployerNotFound, wantStoreCall: true},
+		{name: "internal", principal: newTestEmployerPrincipal(), storeErr: internalErr, wantErr: internalErr, wantStoreCall: true},
 	}
 
 	for _, tt := range tests {
