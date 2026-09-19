@@ -61,6 +61,11 @@ Autenticadas con `AuthenticatedUser` (JWT):
 - `GET /users/{userID}/employee` → `200`
 - `POST /employers` → `201`
 - `GET /users/{userID}/employer` → `200`
+- `POST /employers/{employerID}/jobs` → `201` con el puesto publicado
+- `GET /employers/{employerID}/jobs` → `200` con los puestos activos del empleador
+- `GET /jobs/{jobPositionID}` → `200`
+- `PUT /jobs/{jobPositionID}` → `200`
+- `DELETE /jobs/{jobPositionID}` → `204` sin cuerpo (soft delete, sin reapertura)
 
 Autenticadas con `AuthenticatedEmployeeMiddleWare` (JWT + propiedad del recurso):
 
@@ -85,14 +90,18 @@ Reglas:
 - `internal.PrintValidatorError` → **texto plano** con `http.Error`.
 - Algunos handlers (`POST /auth/register`) usan `http.Error` directo → texto plano.
 
-El FE solo parsea `{error}` (fallback `{messages}`). Preferir `RespondWithError` en
-código nuevo. Unificar el resto es un cambio de contrato: coordinar con el frontend en
-la misma tarea.
+- `internal.RespondWithValidatorError` → JSON `{"error":"..."}` para errores de
+  validación. Hoy lo usa solo `internal/jobposition`.
+
+El FE solo parsea `{error}` (fallback `{messages}`). En código nuevo usar
+`RespondWithError` y `RespondWithValidatorError`: los endpoints de `jobposition`
+responden **todos** sus errores en JSON, incluidos los de validación. Migrar los
+endpoints viejos es un cambio de contrato: coordinar con el frontend en la misma tarea.
 
 Si cambia un contrato, actualizar tipos/mappers del frontend y la documentación de la
-raíz. Los diagramas de `../docs/` contienen diseño futuro: puestos de trabajo, índices,
-colas y recomendaciones aún no existen en este código (empleadores sí, desde la
-migración 0005).
+raíz. Los diagramas de `../docs/` contienen diseño futuro: índices, colas y
+recomendaciones aún no existen en este código (empleadores desde la migración 0005;
+puestos de trabajo desde la 0006 y su CRUD en `internal/jobposition`).
 
 ## Persistencia y transacciones
 

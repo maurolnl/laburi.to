@@ -11,6 +11,7 @@ import (
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/database"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/employee"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/employer"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/jobposition"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/timezone"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/uploader"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/user"
@@ -69,6 +70,10 @@ func (app *application) mountFeatureRoutes(mux *http.ServeMux, psqlDB *sql.DB) {
 	employerRepo := employer.NewRepository(psqlDB)
 	employerHandler := employer.BuildHandlers(employerRepo, validator)
 	employer.RegisterRoutes(mux, employerHandler, app.config.secretKey)
+
+	jobPositionRepo := jobposition.NewRepository(psqlDB)
+	jobPositionHandler := jobposition.BuildHandlers(jobPositionRepo, jobposition.NoopEventPublisher{}, validator)
+	jobposition.RegisterRoutes(mux, jobPositionHandler, app.config.secretKey)
 
 	userHandler := user.BuildHandlers(database.New(psqlDB), app.config.secretKey, validator)
 	user.RegisterRoutes(mux, userHandler, app.config.secretKey)
