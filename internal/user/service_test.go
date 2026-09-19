@@ -32,21 +32,22 @@ func (f *fakeUserStore) GetCurrentUser(_ context.Context, _ int32) (User, error)
 }
 
 func TestSaveUserPreservesRole(t *testing.T) {
-	store := &fakeUserStore{}
-	service := NewService(store, "secret")
+	for _, role := range []UserRole{UserRoleEmployee, UserRoleEmployer} {
+		t.Run(string(role), func(t *testing.T) {
+			store := &fakeUserStore{}
+			service := NewService(store, "secret")
+			request := newTestCreateUserRequest(withTestUserRole(role))
 
-	if err := service.SaveUser(context.Background(), CreateUserReq{
-		Email:    "employee@example.com",
-		Password: "secret123",
-		Role:     UserRoleEmployee,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if store.savedUser.Role != UserRoleEmployee {
-		t.Fatalf("expected employee role, got %q", store.savedUser.Role)
-	}
-	if store.savedUser.Password == "secret123" {
-		t.Fatal("expected password to be hashed")
+			if err := service.SaveUser(context.Background(), request); err != nil {
+				t.Fatal(err)
+			}
+			if store.savedUser.Role != role {
+				t.Fatalf("expected role %q, got %q", role, store.savedUser.Role)
+			}
+			if store.savedUser.Password == request.Password {
+				t.Fatal("expected password to be hashed")
+			}
+		})
 	}
 }
 
@@ -54,16 +55,14 @@ func TestSaveUserRejectsInvalidRoleBeforePersistence(t *testing.T) {
 	store := &fakeUserStore{}
 	service := NewService(store, "secret")
 
-	err := service.SaveUser(context.Background(), CreateUserReq{
-		Email:    "user@example.com",
-		Password: "secret123",
-		Role:     "admin",
-	})
-	if err != ErrInvalidUserRole {
-		t.Fatalf("expected ErrInvalidUserRole, got %v", err)
-	}
-	if store.savedUser.Email != "" {
-		t.Fatal("expected invalid role not to reach persistence")
+	for _, role := range []UserRole{"", "admin"} {
+		err := service.SaveUser(context.Background(), newTestCreateUserRequest(withTestUserRole(role)))
+		if err != ErrInvalidUserRole {
+			t.Fatalf("role %q: expected ErrInvalidUserRole, got %v", role, err)
+		}
+		if store.savedUser.Email != "" {
+			t.Fatalf("role %q: expected invalid role not to reach persistence", role)
+		}
 	}
 }
 
@@ -72,12 +71,12 @@ func TestLoginUsesPersistedBackfillRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store := &fakeUserStore{loginUser: LoginRes{
-		ID:             9,
-		Email:          "historical@example.com",
-		HashedPassword: hash,
-		Role:           UserRoleEmployer,
-	}}
+	store := &fakeUserStore{loginUser: newTestLoginResult(
+		withTestUserID(9),
+		withTestUserEmail("historical@example.com"),
+		withTestUserHash(hash),
+		withTestUserRole(UserRoleEmployer),
+	)}
 	service := NewService(store, "secret")
 
 	userID, role, token, _, err := service.Login(context.Background(), "historical@example.com", "secret123")

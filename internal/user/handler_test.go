@@ -37,6 +37,17 @@ func (f *fakeUserService) GetCurrentUser(_ context.Context, userID int32) (User,
 }
 
 func TestRegisterUserRoles(t *testing.T) {
+	employeeBody, err := json.Marshal(newTestCreateUserRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	employerBody, err := json.Marshal(newTestCreateUserRequest(
+		withTestUserEmail("employer@example.com"),
+		withTestUserRole(UserRoleEmployer),
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name       string
 		body       string
@@ -44,8 +55,8 @@ func TestRegisterUserRoles(t *testing.T) {
 		wantRole   UserRole
 		wantSave   bool
 	}{
-		{"employee", `{"email":"employee@example.com","password":"secret123","role":"employee"}`, http.StatusOK, UserRoleEmployee, true},
-		{"employer", `{"email":"employer@example.com","password":"secret123","role":"employer"}`, http.StatusOK, UserRoleEmployer, true},
+		{"employee", string(employeeBody), http.StatusOK, UserRoleEmployee, true},
+		{"employer", string(employerBody), http.StatusOK, UserRoleEmployer, true},
 		{"missing role", `{"email":"user@example.com","password":"secret123"}`, http.StatusBadRequest, "", false},
 		{"invalid role", `{"email":"user@example.com","password":"secret123","role":"admin"}`, http.StatusBadRequest, "", false},
 	}
@@ -76,7 +87,11 @@ func TestLoginIncludesRole(t *testing.T) {
 	service := &fakeUserService{loginRole: UserRoleEmployer}
 	handler := NewHandler(service, validator.New())
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewBufferString(`{"email":"employer@example.com","password":"secret123"}`))
+	body, err := json.Marshal(newTestLoginRequest(withTestUserEmail("employer@example.com")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewReader(body))
 
 	handler.Login(recorder, request)
 
@@ -94,9 +109,9 @@ func TestLoginIncludesRole(t *testing.T) {
 
 func TestGetCurrentUserUsesTokenPrincipalAndExposesRole(t *testing.T) {
 	const secret = "test-secret"
-	service := &fakeUserService{currentUser: User{ID: 7, Email: "employee@example.com", Role: UserRoleEmployee}}
+	service := &fakeUserService{currentUser: newTestUser(withTestUserRole(UserRoleEmployer))}
 	handler := NewHandler(service, validator.New())
-	token, err := auth.MakeJWT(7, UserRoleEmployee, secret, time.Hour)
+	token, err := auth.MakeJWT(7, UserRoleEmployer, secret, time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +131,7 @@ func TestGetCurrentUserUsesTokenPrincipalAndExposesRole(t *testing.T) {
 	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}
-	if response["ID"] != float64(7) || response["Role"] != string(UserRoleEmployee) {
+	if response["ID"] != float64(7) || response["Role"] != string(UserRoleEmployer) {
 		t.Fatalf("unexpected response: %#v", response)
 	}
 }

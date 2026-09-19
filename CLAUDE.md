@@ -1,7 +1,7 @@
 # Laburi.to Backend
 
-Existe un `CLAUDE.md` equivalente en esta carpeta para Claude Code. Mantener ambos
-alineados cuando se cambie una regla.
+Espejo de `AGENTS.md` (mismo contenido). Mantener ambos alineados cuando se cambie una
+regla.
 
 ## Stack y comandos
 
@@ -142,9 +142,9 @@ sobre una DB compartida ni hacer commit, push o deploy sin pedido explícito.
 Raíz OpenSpec propia en `openspec/`, schema `spec-driven`. Artefactos en español,
 headings estructurales y SHALL/MUST en inglés.
 
-Los comandos `/opsx-*` se definen en `.opencode/commands/`, por lo que solo existen
-como slash commands en opencode. Un agente sin esos comandos debe replicar el mismo
-flujo con el CLI `openspec` ejecutado desde esta carpeta.
+Los comandos `/opsx-*` viven en `.opencode/commands/` y **no están disponibles como
+slash commands en Claude Code**: usar el CLI `openspec` desde esta carpeta o pedir al
+usuario que los corra en opencode.
 
 Flujo: crear aquí la rama con el `gitBranchName` de Linear cuando el backend esté
 afectado, generar la propuesta y detenerse para revisión antes de editar código. Tras

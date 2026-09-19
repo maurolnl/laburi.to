@@ -73,12 +73,7 @@ func makeEmployeeToken(t *testing.T, secret string, userID int32) string {
 
 func TestCreateEmployer(t *testing.T) {
 	const secret = "test-secret"
-	normalizedReq := CreateEmployerRequest{
-		Name:             "Acme",
-		Industry:         "Software",
-		Location:         "Remote",
-		HiringModalities: []string{"Full time"},
-	}
+	normalizedReq := newTestCreateEmployerRequest()
 
 	tests := []struct {
 		name          string
@@ -268,8 +263,6 @@ func TestCreateEmployerErrorFormats(t *testing.T) {
 
 func TestGetEmployer(t *testing.T) {
 	const secret = "test-secret"
-	now := time.Now().UTC().Truncate(time.Second)
-
 	tests := []struct {
 		name           string
 		authorization  string
@@ -287,7 +280,7 @@ func TestGetEmployer(t *testing.T) {
 			name:           "success returns snake_case and empty modalities",
 			authorization:  "Bearer " + makeEmployerToken(t, secret, 42),
 			pathUserID:     "42",
-			serviceResult:  Employer{ID: 7, UserID: 42, Name: "Acme", Industry: "Software", Location: "Remote", CreatedAt: now, UpdatedAt: now},
+			serviceResult:  newTestEmployer(withTestEmployerModalities(nil)),
 			expectedCode:   http.StatusOK,
 			expectCall:     true,
 			expectedUserID: 42,
@@ -341,10 +334,23 @@ func TestGetEmployer(t *testing.T) {
 			name:           "forbidden other user without service call",
 			authorization:  "Bearer " + makeEmployerToken(t, secret, 42),
 			pathUserID:     "43",
+			serviceResult:  newTestEmployer(withTestEmployerName("Private employer")),
 			expectedCode:   http.StatusForbidden,
 			expectCall:     false,
 			expectedUserID: 42,
 			expectedRole:   user.UserRoleEmployer,
+			bodyExcludes:   "Private employer",
+		},
+		{
+			name:           "employee cannot access another user without service call",
+			authorization:  "Bearer " + makeEmployeeToken(t, secret, 5),
+			pathUserID:     "42",
+			serviceResult:  newTestEmployer(withTestEmployerName("Private employer")),
+			expectedCode:   http.StatusForbidden,
+			expectCall:     false,
+			expectedUserID: 5,
+			expectedRole:   user.UserRoleEmployee,
+			bodyExcludes:   "Private employer",
 		},
 		{
 			name:           "employee role forbidden",
