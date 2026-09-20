@@ -123,7 +123,9 @@ descrita arriba.
 
 ### Score nullable y numérico
 
-`score NUMERIC(6,4) NULL`. Nullable porque LAB-30 todavía no define los indicadores y la
+`score NUMERIC(7,4) NULL`. La escala llega a 999.9999 y no a 99.9999 porque LAB-30
+todavía no fija el rango del puntaje, y un techo de 99.9999 dejaría afuera el caso más
+probable, un score porcentual de 100. Nullable porque LAB-30 todavía no define los indicadores y la
 épica prohíbe inventar un algoritmo temporal; una recomendación puede existir sin
 puntaje. `NUMERIC` en lugar de `DOUBLE PRECISION` para que el orden sea determinista y
 reproducible, requisito de los tests de orden y desempate de LAB-35.

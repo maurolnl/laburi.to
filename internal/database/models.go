@@ -110,6 +110,25 @@ type JobPosition struct {
 	DeletedAt              sql.NullTime
 }
 
+type Recommendation struct {
+	ID            int32
+	BatchID       int32
+	EmployeeID    int32
+	JobPositionID int32
+	Score         sql.NullString
+	CreatedAt     time.Time
+}
+
+type RecommendationBatch struct {
+	ID            int32
+	SubjectType   string
+	EmployeeID    sql.NullInt32
+	JobPositionID sql.NullInt32
+	Status        string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 type RefreshToken struct {
 	Token     string
 	CreatedAt time.Time
