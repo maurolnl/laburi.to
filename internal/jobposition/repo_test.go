@@ -6,12 +6,9 @@ import (
 	"errors"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/database"
 )
-
-var testJobPositionTime = time.Date(2026, time.February, 3, 4, 5, 6, 0, time.UTC)
 
 type fakeJobPositionQueries struct {
 	employerResult database.Employer
@@ -72,50 +69,6 @@ func (f *fakeJobPositionQueries) SoftDeleteJobPosition(ctx context.Context, id i
 	return f.deleteResult, f.deleteErr
 }
 
-func newTestDatabaseJobPosition() database.JobPosition {
-	return database.JobPosition{
-		ID:                     11,
-		EmployerID:             7,
-		Position:               "Backend Engineer",
-		Role:                   "Go developer",
-		RequiredExperience:     "2_to_5y",
-		RequiredEducationLevel: "university",
-		AvailableHoursPerDay:   6,
-		Timezone:               "America/Argentina/Buenos_Aires",
-		TechnicalResources:     []string{"Laptop"},
-		CreatedAt:              testJobPositionTime,
-		UpdatedAt:              testJobPositionTime,
-	}
-}
-
-func newTestJobPosition() JobPosition {
-	return JobPosition{
-		ID:                     11,
-		EmployerID:             7,
-		Position:               "Backend Engineer",
-		Role:                   "Go developer",
-		RequiredExperience:     "2_to_5y",
-		RequiredEducationLevel: "university",
-		AvailableHoursPerDay:   6,
-		Timezone:               "America/Argentina/Buenos_Aires",
-		TechnicalResources:     []string{"Laptop"},
-		CreatedAt:              testJobPositionTime,
-		UpdatedAt:              testJobPositionTime,
-	}
-}
-
-func newTestCreateJobPositionRequest() CreateJobPositionRequest {
-	return CreateJobPositionRequest{
-		Position:               "Backend Engineer",
-		Role:                   "Go developer",
-		RequiredExperience:     "2_to_5y",
-		RequiredEducationLevel: "university",
-		AvailableHoursPerDay:   6,
-		Timezone:               "America/Argentina/Buenos_Aires",
-		TechnicalResources:     []string{"Laptop"},
-	}
-}
-
 func newTestRepository(queries *fakeJobPositionQueries, timezoneErr error) *JobPositionRepository {
 	return &JobPositionRepository{
 		queries: queries,
@@ -134,7 +87,7 @@ func TestJobPositionRepositoryGetEmployerIDByUserID(t *testing.T) {
 		wantID   int32
 		wantErr  error
 	}{
-		{name: "success", result: database.Employer{ID: 7, UserID: 42}, wantID: 7},
+		{name: "success", result: newTestDatabaseEmployerRow(), wantID: testEmployerID},
 		{name: "missing employer profile", queryErr: sql.ErrNoRows, wantErr: ErrEmployerProfileRequired},
 		{name: "internal", queryErr: internalErr, wantErr: internalErr},
 	}
@@ -144,7 +97,7 @@ func TestJobPositionRepositoryGetEmployerIDByUserID(t *testing.T) {
 			queries := &fakeJobPositionQueries{employerResult: tt.result, employerErr: tt.queryErr}
 			ctx := context.WithValue(context.Background(), struct{}{}, "request-context")
 
-			got, err := newTestRepository(queries, nil).GetEmployerIDByUserID(ctx, 42)
+			got, err := newTestRepository(queries, nil).GetEmployerIDByUserID(ctx, testUserID)
 			if tt.wantErr != nil {
 				if !errors.Is(err, tt.wantErr) {
 					t.Fatalf("GetEmployerIDByUserID() error = %v, want %v", err, tt.wantErr)
@@ -154,8 +107,8 @@ func TestJobPositionRepositoryGetEmployerIDByUserID(t *testing.T) {
 			if err != nil || got != tt.wantID {
 				t.Fatalf("GetEmployerIDByUserID() = %d, %v; want %d, nil", got, err, tt.wantID)
 			}
-			if queries.employerUserID != 42 {
-				t.Fatalf("GetEmployerIDByUserID userID = %d, want 42", queries.employerUserID)
+			if queries.employerUserID != testUserID {
+				t.Fatalf("GetEmployerIDByUserID userID = %d, want %d", queries.employerUserID, testUserID)
 			}
 			if queries.lastContext != ctx {
 				t.Fatal("GetEmployerIDByUserID did not propagate context")
@@ -168,7 +121,7 @@ func TestJobPositionRepositoryCreateJobPosition(t *testing.T) {
 	queries := &fakeJobPositionQueries{createResult: newTestDatabaseJobPosition()}
 	ctx := context.WithValue(context.Background(), struct{}{}, "request-context")
 
-	got, err := newTestRepository(queries, nil).CreateJobPosition(ctx, 7, newTestCreateJobPositionRequest())
+	got, err := newTestRepository(queries, nil).CreateJobPosition(ctx, testEmployerID, newTestCreateJobPositionRequest())
 	if err != nil {
 		t.Fatalf("CreateJobPosition() error = %v", err)
 	}
@@ -176,16 +129,7 @@ func TestJobPositionRepositoryCreateJobPosition(t *testing.T) {
 		t.Fatalf("CreateJobPosition() = %#v, want %#v", got, newTestJobPosition())
 	}
 
-	wantParams := database.CreateJobPositionParams{
-		EmployerID:             7,
-		Position:               "Backend Engineer",
-		Role:                   "Go developer",
-		RequiredExperience:     "2_to_5y",
-		RequiredEducationLevel: "university",
-		AvailableHoursPerDay:   6,
-		Timezone:               "America/Argentina/Buenos_Aires",
-		TechnicalResources:     []string{"Laptop"},
-	}
+	wantParams := newTestCreateJobPositionParams()
 	if !reflect.DeepEqual(queries.createParams, wantParams) {
 		t.Fatalf("CreateJobPosition params = %#v, want %#v", queries.createParams, wantParams)
 	}
@@ -197,7 +141,7 @@ func TestJobPositionRepositoryCreateJobPosition(t *testing.T) {
 func TestJobPositionRepositoryRejectsUnknownTimezoneBeforeWriting(t *testing.T) {
 	t.Run("create", func(t *testing.T) {
 		queries := &fakeJobPositionQueries{createResult: newTestDatabaseJobPosition()}
-		_, err := newTestRepository(queries, ErrInvalidTimezone).CreateJobPosition(context.Background(), 7, newTestCreateJobPositionRequest())
+		_, err := newTestRepository(queries, ErrInvalidTimezone).CreateJobPosition(context.Background(), testEmployerID, newTestCreateJobPositionRequest())
 		if !errors.Is(err, ErrInvalidTimezone) {
 			t.Fatalf("CreateJobPosition() error = %v, want %v", err, ErrInvalidTimezone)
 		}
@@ -208,7 +152,7 @@ func TestJobPositionRepositoryRejectsUnknownTimezoneBeforeWriting(t *testing.T) 
 
 	t.Run("update", func(t *testing.T) {
 		queries := &fakeJobPositionQueries{updateResult: newTestDatabaseJobPosition()}
-		_, err := newTestRepository(queries, ErrInvalidTimezone).UpdateActiveJobPosition(context.Background(), 11, newTestCreateJobPositionRequest())
+		_, err := newTestRepository(queries, ErrInvalidTimezone).UpdateActiveJobPosition(context.Background(), testJobPositionID, newTestCreateJobPositionRequest())
 		if !errors.Is(err, ErrInvalidTimezone) {
 			t.Fatalf("UpdateActiveJobPosition() error = %v, want %v", err, ErrInvalidTimezone)
 		}
@@ -223,21 +167,21 @@ func TestJobPositionRepositoryTranslatesNoRows(t *testing.T) {
 
 	t.Run("get", func(t *testing.T) {
 		repo := newTestRepository(&fakeJobPositionQueries{getErr: sql.ErrNoRows}, nil)
-		if _, err := repo.GetActiveJobPositionByID(ctx, 11); !errors.Is(err, ErrJobPositionNotFound) {
+		if _, err := repo.GetActiveJobPositionByID(ctx, testJobPositionID); !errors.Is(err, ErrJobPositionNotFound) {
 			t.Fatalf("GetActiveJobPositionByID() error = %v, want %v", err, ErrJobPositionNotFound)
 		}
 	})
 
 	t.Run("update", func(t *testing.T) {
 		repo := newTestRepository(&fakeJobPositionQueries{updateErr: sql.ErrNoRows}, nil)
-		if _, err := repo.UpdateActiveJobPosition(ctx, 11, newTestCreateJobPositionRequest()); !errors.Is(err, ErrJobPositionNotFound) {
+		if _, err := repo.UpdateActiveJobPosition(ctx, testJobPositionID, newTestCreateJobPositionRequest()); !errors.Is(err, ErrJobPositionNotFound) {
 			t.Fatalf("UpdateActiveJobPosition() error = %v, want %v", err, ErrJobPositionNotFound)
 		}
 	})
 
 	t.Run("delete", func(t *testing.T) {
 		repo := newTestRepository(&fakeJobPositionQueries{deleteErr: sql.ErrNoRows}, nil)
-		if err := repo.SoftDeleteJobPosition(ctx, 11); !errors.Is(err, ErrJobPositionNotFound) {
+		if err := repo.SoftDeleteJobPosition(ctx, testJobPositionID); !errors.Is(err, ErrJobPositionNotFound) {
 			t.Fatalf("SoftDeleteJobPosition() error = %v, want %v", err, ErrJobPositionNotFound)
 		}
 	})
@@ -246,7 +190,7 @@ func TestJobPositionRepositoryTranslatesNoRows(t *testing.T) {
 func TestJobPositionRepositoryListReturnsEmptySliceAndMapsRows(t *testing.T) {
 	t.Run("no rows", func(t *testing.T) {
 		repo := newTestRepository(&fakeJobPositionQueries{listResult: nil}, nil)
-		got, err := repo.ListActiveJobPositionsByEmployer(context.Background(), 7)
+		got, err := repo.ListActiveJobPositionsByEmployer(context.Background(), testEmployerID)
 		if err != nil {
 			t.Fatalf("ListActiveJobPositionsByEmployer() error = %v", err)
 		}
@@ -260,7 +204,7 @@ func TestJobPositionRepositoryListReturnsEmptySliceAndMapsRows(t *testing.T) {
 		row.TechnicalResources = nil
 		repo := newTestRepository(&fakeJobPositionQueries{listResult: []database.JobPosition{row}}, nil)
 
-		got, err := repo.ListActiveJobPositionsByEmployer(context.Background(), 7)
+		got, err := repo.ListActiveJobPositionsByEmployer(context.Background(), testEmployerID)
 		if err != nil || len(got) != 1 {
 			t.Fatalf("ListActiveJobPositionsByEmployer() = %#v, %v", got, err)
 		}
@@ -274,11 +218,71 @@ func TestJobPositionRepositoryDoesNotLeakDatabaseErrors(t *testing.T) {
 	internalErr := errors.New("pq: relation does not exist")
 	repo := newTestRepository(&fakeJobPositionQueries{createErr: internalErr}, nil)
 
-	_, err := repo.CreateJobPosition(context.Background(), 7, newTestCreateJobPositionRequest())
+	_, err := repo.CreateJobPosition(context.Background(), testEmployerID, newTestCreateJobPositionRequest())
 	if !errors.Is(err, internalErr) {
 		t.Fatalf("CreateJobPosition() error = %v, want the wrapped original error", err)
 	}
 	if errors.Is(err, ErrJobPositionNotFound) || errors.Is(err, ErrJobPositionForbidden) {
 		t.Fatalf("CreateJobPosition() incorrectly classified internal error: %v", err)
+	}
+}
+
+func TestJobPositionRepositoryForwardsTechnicalResourceVariants(t *testing.T) {
+	tests := []struct {
+		name      string
+		resources []string
+	}{
+		{name: "none", resources: []string{}},
+		{name: "single", resources: []string{"Laptop"}},
+		{name: "multiple", resources: []string{"Laptop", "VPN", "Monitor"}},
+	}
+
+	for _, tt := range tests {
+		t.Run("create/"+tt.name, func(t *testing.T) {
+			option := withTestJobPositionResources(tt.resources)
+			queries := &fakeJobPositionQueries{createResult: newTestDatabaseJobPosition(option)}
+
+			got, err := newTestRepository(queries, nil).CreateJobPosition(context.Background(), testEmployerID, newTestCreateJobPositionRequest(option))
+			if err != nil {
+				t.Fatalf("CreateJobPosition() error = %v", err)
+			}
+			if !reflect.DeepEqual(queries.createParams, newTestCreateJobPositionParams(option)) {
+				t.Fatalf("create params = %#v, want %#v", queries.createParams, newTestCreateJobPositionParams(option))
+			}
+			if !reflect.DeepEqual(got.TechnicalResources, tt.resources) {
+				t.Fatalf("TechnicalResources = %#v, want %#v in the same order", got.TechnicalResources, tt.resources)
+			}
+		})
+
+		t.Run("update/"+tt.name, func(t *testing.T) {
+			option := withTestJobPositionResources(tt.resources)
+			queries := &fakeJobPositionQueries{updateResult: newTestDatabaseJobPosition(option)}
+
+			got, err := newTestRepository(queries, nil).UpdateActiveJobPosition(context.Background(), testJobPositionID, newTestCreateJobPositionRequest(option))
+			if err != nil {
+				t.Fatalf("UpdateActiveJobPosition() error = %v", err)
+			}
+			if !reflect.DeepEqual(queries.updateParams, newTestUpdateJobPositionParams(option)) {
+				t.Fatalf("update params = %#v, want %#v", queries.updateParams, newTestUpdateJobPositionParams(option))
+			}
+			if !reflect.DeepEqual(got.TechnicalResources, tt.resources) {
+				t.Fatalf("TechnicalResources = %#v, want %#v in the same order", got.TechnicalResources, tt.resources)
+			}
+		})
+	}
+}
+
+// TestJobPositionRepositoryNormalizesNullTechnicalResources cubre la fila persistida con
+// NULL: el contrato nunca expone null, ni siquiera cuando la columna lo permite.
+func TestJobPositionRepositoryNormalizesNullTechnicalResources(t *testing.T) {
+	option := withTestJobPositionResources(nil)
+	queries := &fakeJobPositionQueries{getResult: newTestDatabaseJobPosition(option)}
+
+	got, err := newTestRepository(queries, nil).GetActiveJobPositionByID(context.Background(), testJobPositionID)
+	if err != nil {
+		t.Fatalf("GetActiveJobPositionByID() error = %v", err)
+	}
+	if got.TechnicalResources == nil || len(got.TechnicalResources) != 0 {
+		t.Fatalf("TechnicalResources = %#v, want an empty non-nil slice", got.TechnicalResources)
 	}
 }
