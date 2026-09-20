@@ -10,93 +10,6 @@ import (
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/user"
 )
 
-const (
-	testUserID        int32 = 42
-	testEmployerID    int32 = 7
-	testJobPositionID int32 = 11
-)
-
-type fakeJobPositionStore struct {
-	employerID    int32
-	employerErr   error
-	createResult  JobPosition
-	createErr     error
-	getResult     JobPosition
-	getErr        error
-	listResult    []JobPosition
-	listErr       error
-	updateResult  JobPosition
-	updateErr     error
-	deleteErr     error
-	employerCalls int
-	createCalls   int
-	getCalls      int
-	listCalls     int
-	updateCalls   int
-	deleteCalls   int
-}
-
-func (f *fakeJobPositionStore) GetEmployerIDByUserID(context.Context, int32) (int32, error) {
-	f.employerCalls++
-	return f.employerID, f.employerErr
-}
-
-func (f *fakeJobPositionStore) CreateJobPosition(context.Context, int32, CreateJobPositionRequest) (JobPosition, error) {
-	f.createCalls++
-	return f.createResult, f.createErr
-}
-
-func (f *fakeJobPositionStore) GetActiveJobPositionByID(context.Context, int32) (JobPosition, error) {
-	f.getCalls++
-	return f.getResult, f.getErr
-}
-
-func (f *fakeJobPositionStore) ListActiveJobPositionsByEmployer(context.Context, int32) ([]JobPosition, error) {
-	f.listCalls++
-	return f.listResult, f.listErr
-}
-
-func (f *fakeJobPositionStore) UpdateActiveJobPosition(context.Context, int32, UpdateJobPositionRequest) (JobPosition, error) {
-	f.updateCalls++
-	return f.updateResult, f.updateErr
-}
-
-func (f *fakeJobPositionStore) SoftDeleteJobPosition(context.Context, int32) error {
-	f.deleteCalls++
-	return f.deleteErr
-}
-
-func (f *fakeJobPositionStore) writeCalls() int {
-	return f.createCalls + f.updateCalls + f.deleteCalls
-}
-
-type fakePublisher struct {
-	err       error
-	published []JobPosition
-}
-
-func (f *fakePublisher) JobPositionPublished(_ context.Context, position JobPosition) error {
-	f.published = append(f.published, position)
-	return f.err
-}
-
-func employerPrincipal() auth.Principal {
-	return auth.Principal{UserID: testUserID, Role: user.UserRoleEmployer}
-}
-
-func employeePrincipal() auth.Principal {
-	return auth.Principal{UserID: testUserID, Role: user.UserRoleEmployee}
-}
-
-func ownedStore() *fakeJobPositionStore {
-	return &fakeJobPositionStore{
-		employerID:   testEmployerID,
-		createResult: newTestJobPosition(),
-		getResult:    newTestJobPosition(),
-		updateResult: newTestJobPosition(),
-	}
-}
-
 // operation ejerce cada punto de entrada del servicio con la misma firma para poder
 // recorrer las cinco operaciones en las tablas de autorización y ownership.
 type operation struct {
@@ -179,8 +92,7 @@ func TestJobPositionServiceRejectsForeignCollection(t *testing.T) {
 }
 
 func TestJobPositionServiceRejectsForeignPosition(t *testing.T) {
-	foreign := newTestJobPosition()
-	foreign.EmployerID = testEmployerID + 1
+	foreign := newTestJobPosition(withTestJobPositionEmployerID(testEmployerID + 1))
 
 	for _, op := range allOperations()[2:] {
 		t.Run(op.name, func(t *testing.T) {
@@ -290,7 +202,7 @@ func TestJobPositionServiceNotifiesPublisherOnlyOnSuccess(t *testing.T) {
 	}{
 		{
 			name:  "rejected by role",
-			store: ownedStore,
+			store: func() *fakeJobPositionStore { return ownedStore() },
 			run: func(s JobPositionService) error {
 				_, err := s.CreateJobPosition(context.Background(), testEmployerID, newTestCreateJobPositionRequest(), employeePrincipal())
 				return err
@@ -350,5 +262,55 @@ func TestJobPositionServiceSurvivesPublisherFailure(t *testing.T) {
 func TestNoopEventPublisherSucceeds(t *testing.T) {
 	if err := (NoopEventPublisher{}).JobPositionPublished(context.Background(), newTestJobPosition()); err != nil {
 		t.Fatalf("JobPositionPublished() error = %v, want nil", err)
+	}
+}
+
+// TestJobPositionServiceDerivesEmployerFromPrincipal comprueba que el empleador con el que
+// se persiste el puesto es el resuelto desde el JWT, y que la request llega al store tal
+// como la recibió el servicio, incluidos los recursos técnicos.
+func TestJobPositionServiceDerivesEmployerFromPrincipal(t *testing.T) {
+	option := withTestJobPositionResources([]string{"Laptop", "VPN", "Monitor"})
+	store := ownedStore(option)
+	request := newTestCreateJobPositionRequest(option)
+
+	if _, err := NewService(store, &fakePublisher{}).CreateJobPosition(context.Background(), testEmployerID, request, employerPrincipal()); err != nil {
+		t.Fatalf("CreateJobPosition() error = %v", err)
+	}
+	if store.createEmployerID != testEmployerID {
+		t.Fatalf("store employerID = %d, want %d resolved from the principal", store.createEmployerID, testEmployerID)
+	}
+	if !reflect.DeepEqual(store.createRequest, request) {
+		t.Fatalf("store request = %#v, want %#v", store.createRequest, request)
+	}
+
+	updateStore := ownedStore(option)
+	if _, err := NewService(updateStore, &fakePublisher{}).UpdateJobPosition(context.Background(), testJobPositionID, request, employerPrincipal()); err != nil {
+		t.Fatalf("UpdateJobPosition() error = %v", err)
+	}
+	if !reflect.DeepEqual(updateStore.updateRequest, request) {
+		t.Fatalf("store update request = %#v, want %#v", updateStore.updateRequest, request)
+	}
+}
+
+// TestJobPositionEventPublisherPortIsAlwaysADouble documenta que la suite no habla con SQS:
+// el puerto se satisface con el doble del paquete y con la implementación vigente del
+// binario, y ninguna de las dos abre red ni lee entorno.
+func TestJobPositionEventPublisherPortIsAlwaysADouble(t *testing.T) {
+	var _ JobPositionEventPublisher = &fakePublisher{}
+	var _ JobPositionEventPublisher = NoopEventPublisher{}
+
+	publisher := &fakePublisher{}
+	position := newTestJobPosition()
+	if err := publisher.JobPositionPublished(context.Background(), position); err != nil {
+		t.Fatalf("fake publisher error = %v", err)
+	}
+	if len(publisher.published) != 1 || !reflect.DeepEqual(publisher.published[0], position) {
+		t.Fatalf("published = %#v, want the notified position", publisher.published)
+	}
+
+	// Un servicio sin publicador no debe romperse: el puerto es opcional mientras la épica
+	// de recomendaciones no exista.
+	if _, err := NewService(ownedStore(), nil).CreateJobPosition(context.Background(), testEmployerID, newTestCreateJobPositionRequest(), employerPrincipal()); err != nil {
+		t.Fatalf("CreateJobPosition() with a nil publisher error = %v", err)
 	}
 }

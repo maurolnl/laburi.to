@@ -4,18 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/auth"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/user"
 )
-
-const testSecret = "test-secret"
 
 type fakeJobPositionService struct {
 	createResult  JobPosition
@@ -68,18 +67,16 @@ func (f *fakeJobPositionService) DeleteJobPosition(_ context.Context, jobPositio
 }
 
 func newTestMux(fake *fakeJobPositionService) *http.ServeMux {
-	mux := http.NewServeMux()
-	RegisterRoutes(mux, NewHandler(fake, validator.New(validator.WithRequiredStructEnabled())), testSecret)
-	return mux
+	return newTestMuxWithService(fake)
 }
 
-func employerToken(t *testing.T) string {
-	t.Helper()
-	token, err := auth.MakeJWT(testUserID, user.UserRoleEmployer, testSecret, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return token
+// newTestMuxWithService monta las rutas sobre cualquier implementación del servicio, para
+// poder ejercer el borde HTTP contra el servicio real y un store doble cuando el escenario
+// depende de la conducta del dominio y no solo de la adaptación HTTP.
+func newTestMuxWithService(service JobPositionService) *http.ServeMux {
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, NewHandler(service, validator.New(validator.WithRequiredStructEnabled())), testSecret)
+	return mux
 }
 
 func doRequest(t *testing.T, mux *http.ServeMux, method, target, body, token string) *httptest.ResponseRecorder {
@@ -99,10 +96,19 @@ func doRequest(t *testing.T, mux *http.ServeMux, method, target, body, token str
 	return recorder
 }
 
-func validBody() string {
-	return `{"position":"Backend Engineer","role":"Go developer","required_experience":"2_to_5y",` +
-		`"required_education_level":"university","available_hours_per_day":6,` +
-		`"timezone":"America/Argentina/Buenos_Aires","technical_resources":["Laptop"]}`
+func validBody(t *testing.T) string {
+	t.Helper()
+	return newTestJobPositionBody(t)
+}
+
+// employerJobsPath y jobPath derivan las rutas de los mismos identificadores que usan las
+// factories, para que un cambio de identidad de prueba no deje targets desincronizados.
+func employerJobsPath() string {
+	return fmt.Sprintf("/employers/%d/jobs", testEmployerID)
+}
+
+func jobPath() string {
+	return fmt.Sprintf("/jobs/%d", testJobPositionID)
 }
 
 type route struct {
@@ -112,13 +118,23 @@ type route struct {
 	body   string
 }
 
-func allRoutes() []route {
+func allRoutes(t *testing.T) []route {
+	t.Helper()
 	return []route{
-		{"create", http.MethodPost, "/employers/7/jobs", validBody()},
-		{"list", http.MethodGet, "/employers/7/jobs", ""},
-		{"get", http.MethodGet, "/jobs/11", ""},
-		{"update", http.MethodPut, "/jobs/11", validBody()},
-		{"delete", http.MethodDelete, "/jobs/11", ""},
+		{"create", http.MethodPost, employerJobsPath(), validBody(t)},
+		{"list", http.MethodGet, employerJobsPath(), ""},
+		{"get", http.MethodGet, jobPath(), ""},
+		{"update", http.MethodPut, jobPath(), validBody(t)},
+		{"delete", http.MethodDelete, jobPath(), ""},
+	}
+}
+
+// writeRoutes son las dos operaciones que aceptan cuerpo y, por lo tanto, atraviesan la
+// validación del dominio.
+func writeRoutes() []route {
+	return []route{
+		{"create", http.MethodPost, employerJobsPath(), ""},
+		{"update", http.MethodPut, jobPath(), ""},
 	}
 }
 
@@ -135,7 +151,7 @@ func decodeError(t *testing.T, recorder *httptest.ResponseRecorder) string {
 }
 
 func TestJobPositionRoutesRequireAuthentication(t *testing.T) {
-	for _, r := range allRoutes() {
+	for _, r := range allRoutes(t) {
 		t.Run(r.name, func(t *testing.T) {
 			fake := &fakeJobPositionService{}
 			recorder := doRequest(t, newTestMux(fake), r.method, r.target, r.body, "")
@@ -153,7 +169,7 @@ func TestJobPositionRoutesRequireAuthentication(t *testing.T) {
 
 func TestJobPositionRoutesRejectInvalidPathIDs(t *testing.T) {
 	tests := []route{
-		{"non numeric employer", http.MethodPost, "/employers/abc/jobs", validBody()},
+		{"non numeric employer", http.MethodPost, "/employers/abc/jobs", validBody(t)},
 		{"zero employer", http.MethodGet, "/employers/0/jobs", ""},
 		{"non numeric position", http.MethodGet, "/jobs/abc", ""},
 		{"negative position", http.MethodDelete, "/jobs/-1", ""},
@@ -176,23 +192,19 @@ func TestJobPositionHandlerRejectsInvalidBodies(t *testing.T) {
 		body string
 	}{
 		{"malformed JSON", `{"position":`},
-		{"trailing content", validBody() + `{"extra":true}`},
-		{"missing required field", `{"role":"Go developer","required_experience":"2_to_5y","required_education_level":"university","available_hours_per_day":6,"timezone":"America/Argentina/Buenos_Aires"}`},
-		{"blank position after trim", strings.Replace(validBody(), `"Backend Engineer"`, `"   "`, 1)},
-		{"experience out of domain", strings.Replace(validBody(), `"2_to_5y"`, `"20y"`, 1)},
-		{"education out of domain", strings.Replace(validBody(), `"university"`, `"kindergarten"`, 1)},
-		{"hours above range", strings.Replace(validBody(), `"available_hours_per_day":6`, `"available_hours_per_day":9`, 1)},
-		{"hours below range", strings.Replace(validBody(), `"available_hours_per_day":6`, `"available_hours_per_day":0`, 1)},
+		{"trailing content", validBody(t) + `{"extra":true}`},
+		{"missing required field", newTestJobPositionBodyWithout(t, "position")},
+		{"missing timezone", newTestJobPositionBodyWithout(t, "timezone")},
+		{"blank position after trim", newTestJobPositionBody(t, withTestJobPositionPosition("   "))},
+		{"blank role after trim", newTestJobPositionBody(t, withTestJobPositionRole(" \t "))},
+		{"experience out of domain", newTestJobPositionBody(t, withTestJobPositionExperience("20y"))},
+		{"education out of domain", newTestJobPositionBody(t, withTestJobPositionEducationLevel("kindergarten"))},
+		{"hours above range", newTestJobPositionBody(t, withTestJobPositionHours(testMaxHoursPerDay+1))},
+		{"hours below range", newTestJobPositionBody(t, withTestJobPositionHours(testMinHoursPerDay-1))},
+		{"blank technical resource", newTestJobPositionBody(t, withTestJobPositionResources([]string{"Laptop", "  "}))},
 	}
 
-	for _, method := range []struct {
-		name   string
-		method string
-		target string
-	}{
-		{"create", http.MethodPost, "/employers/7/jobs"},
-		{"update", http.MethodPut, "/jobs/11"},
-	} {
+	for _, method := range writeRoutes() {
 		for _, tt := range tests {
 			t.Run(method.name+"/"+tt.name, func(t *testing.T) {
 				fake := &fakeJobPositionService{}
@@ -225,7 +237,7 @@ func TestJobPositionHandlerMapsServiceErrors(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		for _, r := range allRoutes() {
+		for _, r := range allRoutes(t) {
 			t.Run(tt.name+"/"+r.name, func(t *testing.T) {
 				fake := &fakeJobPositionService{
 					createErr: tt.serviceErr,
@@ -256,7 +268,7 @@ func TestJobPositionHandlerSuccessResponses(t *testing.T) {
 
 	t.Run("create returns 201 with the position", func(t *testing.T) {
 		fake := &fakeJobPositionService{createResult: position}
-		recorder := doRequest(t, newTestMux(fake), http.MethodPost, "/employers/7/jobs", validBody(), employerToken(t))
+		recorder := doRequest(t, newTestMux(fake), http.MethodPost, employerJobsPath(), validBody(t), employerToken(t))
 
 		if recorder.Code != http.StatusCreated {
 			t.Fatalf("status = %d, want %d (%s)", recorder.Code, http.StatusCreated, recorder.Body.String())
@@ -298,7 +310,7 @@ func TestJobPositionHandlerSuccessResponses(t *testing.T) {
 
 	t.Run("empty list returns an array", func(t *testing.T) {
 		fake := &fakeJobPositionService{listResult: []JobPosition{}}
-		recorder := doRequest(t, newTestMux(fake), http.MethodGet, "/employers/7/jobs", "", employerToken(t))
+		recorder := doRequest(t, newTestMux(fake), http.MethodGet, employerJobsPath(), "", employerToken(t))
 
 		if recorder.Code != http.StatusOK {
 			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
@@ -312,10 +324,10 @@ func TestJobPositionHandlerSuccessResponses(t *testing.T) {
 		fake := &fakeJobPositionService{getResult: position, updateResult: position}
 		mux := newTestMux(fake)
 
-		if recorder := doRequest(t, mux, http.MethodGet, "/jobs/11", "", employerToken(t)); recorder.Code != http.StatusOK {
+		if recorder := doRequest(t, mux, http.MethodGet, jobPath(), "", employerToken(t)); recorder.Code != http.StatusOK {
 			t.Fatalf("get status = %d, want %d", recorder.Code, http.StatusOK)
 		}
-		if recorder := doRequest(t, mux, http.MethodPut, "/jobs/11", validBody(), employerToken(t)); recorder.Code != http.StatusOK {
+		if recorder := doRequest(t, mux, http.MethodPut, jobPath(), validBody(t), employerToken(t)); recorder.Code != http.StatusOK {
 			t.Fatalf("update status = %d, want %d", recorder.Code, http.StatusOK)
 		}
 		if fake.lastPositionn != testJobPositionID {
@@ -325,7 +337,7 @@ func TestJobPositionHandlerSuccessResponses(t *testing.T) {
 
 	t.Run("delete returns 204 without a body", func(t *testing.T) {
 		fake := &fakeJobPositionService{}
-		recorder := doRequest(t, newTestMux(fake), http.MethodDelete, "/jobs/11", "", employerToken(t))
+		recorder := doRequest(t, newTestMux(fake), http.MethodDelete, jobPath(), "", employerToken(t))
 
 		if recorder.Code != http.StatusNoContent {
 			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNoContent)
@@ -334,4 +346,147 @@ func TestJobPositionHandlerSuccessResponses(t *testing.T) {
 			t.Fatalf("body = %s, want an empty body", recorder.Body.String())
 		}
 	})
+}
+
+func TestJobPositionHandlerAcceptsEveryDomainValue(t *testing.T) {
+	overrides := make([]struct {
+		name   string
+		option testJobPositionOption
+	}, 0, len(testRequiredExperiences)+len(testRequiredEducationLevels)+2)
+
+	for _, experience := range testRequiredExperiences {
+		overrides = append(overrides, struct {
+			name   string
+			option testJobPositionOption
+		}{"experience/" + experience, withTestJobPositionExperience(experience)})
+	}
+	for _, level := range testRequiredEducationLevels {
+		overrides = append(overrides, struct {
+			name   string
+			option testJobPositionOption
+		}{"education/" + level, withTestJobPositionEducationLevel(level)})
+	}
+	overrides = append(overrides,
+		struct {
+			name   string
+			option testJobPositionOption
+		}{"hours/minimum", withTestJobPositionHours(testMinHoursPerDay)},
+		struct {
+			name   string
+			option testJobPositionOption
+		}{"hours/maximum", withTestJobPositionHours(testMaxHoursPerDay)},
+	)
+
+	for _, override := range overrides {
+		for _, r := range writeRoutes() {
+			t.Run(r.name+"/"+override.name, func(t *testing.T) {
+				position := newTestJobPosition(override.option)
+				fake := &fakeJobPositionService{createResult: position, updateResult: position}
+				body := newTestJobPositionBody(t, override.option)
+
+				recorder := doRequest(t, newTestMux(fake), r.method, r.target, body, employerToken(t))
+
+				wantCode := http.StatusCreated
+				if r.method == http.MethodPut {
+					wantCode = http.StatusOK
+				}
+				if recorder.Code != wantCode {
+					t.Fatalf("status = %d, want %d (%s)", recorder.Code, wantCode, recorder.Body.String())
+				}
+				if !reflect.DeepEqual(fake.lastRequest, newTestCreateJobPositionRequest(override.option)) {
+					t.Fatalf("service request = %#v, want %#v", fake.lastRequest, newTestCreateJobPositionRequest(override.option))
+				}
+			})
+		}
+	}
+}
+
+func TestJobPositionHandlerForwardsTechnicalResourceVariants(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{"omitted", newTestJobPositionBodyWithout(t, "technical_resources"), []string{}},
+		{"explicit null", newTestJobPositionBodyWith(t, map[string]any{"technical_resources": nil}), []string{}},
+		{"empty", newTestJobPositionBody(t, withTestJobPositionResources([]string{})), []string{}},
+		{"multiple", newTestJobPositionBody(t, withTestJobPositionResources([]string{"Laptop", "VPN", "Monitor"})), []string{"Laptop", "VPN", "Monitor"}},
+	}
+
+	for _, tt := range tests {
+		for _, r := range writeRoutes() {
+			t.Run(r.name+"/"+tt.name, func(t *testing.T) {
+				fake := &fakeJobPositionService{createResult: newTestJobPosition(), updateResult: newTestJobPosition()}
+				doRequest(t, newTestMux(fake), r.method, r.target, tt.body, employerToken(t))
+
+				if fake.lastRequest.TechnicalResources == nil {
+					t.Fatal("service received nil technical resources, want an empty non-nil slice")
+				}
+				if !reflect.DeepEqual(fake.lastRequest.TechnicalResources, tt.want) {
+					t.Fatalf("technical resources = %#v, want %#v", fake.lastRequest.TechnicalResources, tt.want)
+				}
+			})
+		}
+	}
+}
+
+// TestJobPositionHandlerIgnoresClientAttribution comprueba que el cuerpo no puede reasignar
+// el puesto: los campos de atribución no forman parte de CreateJobPositionRequest y el
+// empleador siempre se deriva del path validado contra el JWT.
+func TestJobPositionHandlerIgnoresClientAttribution(t *testing.T) {
+	foreignEmployerID := testEmployerID + 1
+	body := newTestJobPositionBodyWith(t, map[string]any{
+		"id":          999,
+		"employer_id": foreignEmployerID,
+		"created_at":  "2000-01-01T00:00:00Z",
+	})
+
+	fake := &fakeJobPositionService{createResult: newTestJobPosition()}
+	recorder := doRequest(t, newTestMux(fake), http.MethodPost, employerJobsPath(), body, employerToken(t))
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d (%s)", recorder.Code, http.StatusCreated, recorder.Body.String())
+	}
+	if fake.lastEmployer != testEmployerID {
+		t.Fatalf("employerID = %d, want %d derived from the path validated against the JWT", fake.lastEmployer, testEmployerID)
+	}
+	if !reflect.DeepEqual(fake.lastRequest, newTestCreateJobPositionRequest()) {
+		t.Fatalf("service request = %#v, want the contract fields only", fake.lastRequest)
+	}
+	if fake.lastPrincipal.UserID != testUserID || fake.lastPrincipal.Role != user.UserRoleEmployer {
+		t.Fatalf("principal = %#v, want the authenticated employer", fake.lastPrincipal)
+	}
+}
+
+// TestJobPositionHandlerDoesNotReopenDeletedPositions ejerce el borde HTTP contra el
+// servicio real: un puesto eliminado no puede editarse ni volver a eliminarse, y ninguna de
+// las dos operaciones escribe ni notifica al proceso de recomendaciones.
+func TestJobPositionHandlerDoesNotReopenDeletedPositions(t *testing.T) {
+	tests := []route{
+		{"update", http.MethodPut, jobPath(), validBody(t)},
+		{"delete", http.MethodDelete, jobPath(), ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := ownedStore()
+			store.getErr = ErrJobPositionNotFound
+			publisher := &fakePublisher{}
+
+			recorder := doRequest(t, newTestMuxWithService(NewService(store, publisher)), tt.method, tt.target, tt.body, employerToken(t))
+
+			if recorder.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want %d (%s)", recorder.Code, http.StatusNotFound, recorder.Body.String())
+			}
+			if message := decodeError(t, recorder); message != ErrJobPositionNotFound.Error() {
+				t.Fatalf("error = %q, want %q", message, ErrJobPositionNotFound.Error())
+			}
+			if store.writeCalls() != 0 {
+				t.Fatalf("%s wrote a deleted job position: %#v", tt.name, store)
+			}
+			if len(publisher.published) != 0 {
+				t.Fatalf("%s notified the recommendation process: %#v", tt.name, publisher.published)
+			}
+		})
+	}
 }
