@@ -157,6 +157,6 @@
       reprocesar es idempotente y no deja conjuntos parciales (5.3, 5.7); empty result y
       failed se distinguen (5.10); migraciones, queries sqlc y tests de transacción
       incluidos (1.x, 3.x, 5.6 y 5.7).
-- [ ] 6.6 Dejar asentado en el PR que el número de migración `0007` queda reservado y
+- [x] 6.6 Dejar asentado en el PR que el número de migración `0007` queda reservado y
       que el repositorio no tiene CI, de modo que los tests de integración dependen hoy
       de que se ejecuten localmente.
