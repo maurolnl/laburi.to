@@ -143,8 +143,13 @@ error, para que pueda traducirse a un batch fallido.
   ningún puntaje
 
 #### Scenario: Evaluación por lote en producción
-- **WHEN** se evalúa un lote con la implementación de producción
+- **WHEN** se evalúa un lote con al menos un par con la implementación de producción
 - **THEN** la operación falla con el mismo error y no devuelve resultados parciales
+
+#### Scenario: Lote vacío en producción
+- **WHEN** se evalúa un lote sin pares con la implementación de producción
+- **THEN** la operación devuelve un conjunto vacío sin error, porque no hay nada que
+  puntuar y ninguna dependencia hace falta
 
 #### Scenario: Filtro duro en producción
 - **WHEN** se consulta la elegibilidad de un par con la implementación de producción

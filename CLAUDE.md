@@ -37,9 +37,15 @@ la referencia. Según la feature se requieren `DB_URL`, `SECRET_KEY`, `SPA_URL`,
 - `sql/queries/`: consultas fuente de sqlc.
 - `sql/schema/`: migraciones PostgreSQL ordenadas e inmutables una vez aplicadas
   (`0001_employees` … `0005_add_user_roles_and_employers`).
-- Features: `user` (auth + roles), `employee`, `employer`, `timezone`.
+- Features: `user` (auth + roles), `employee`, `employer`, `jobposition`, `timezone`.
+- Persistencia sin HTTP: `internal/recommendation` (batches y recomendaciones; todavía
+  sin productor, worker ni endpoints).
 - Transversales: `internal/auth` (JWT, Argon2id, `UserRole`), `internal/files` (PDFs),
-  `internal/uploader` (S3), `internal/*.go` (helpers de respuesta y validación).
+  `internal/uploader` (S3), `internal/scoring` (contrato inyectable de scoring),
+  `internal/*.go` (helpers de respuesta y validación).
+- `internal/scoring` define el contrato, **no** el algoritmo: su única implementación de
+  producción es `Unavailable`, que falla con `ErrScoringUnavailable`. No inventar puntajes
+  ni cablearla en `cmd/api.go`; el consumidor es el worker de LAB-33.
 
 Mantener el flujo `route -> middleware -> handler -> service -> store/repository`.
 Preferir cambios locales a crear capas nuevas.
