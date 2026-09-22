@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-20
+goal: Separar filtros duros, calculo y persistencia detras de una interfaz
+  Scorer, con implementacion de produccion no disponible y fake determinista
+  para tests
