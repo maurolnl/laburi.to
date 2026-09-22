@@ -6,7 +6,7 @@ alineados cuando se cambie una regla.
 ## Stack y comandos
 
 API Go 1.25 sobre `net/http` (routing con patterns método+ruta), PostgreSQL/libpq,
-sqlc, validator v10, JWT, Argon2id y AWS SDK v2 para S3.
+sqlc, validator v10, JWT, Argon2id y AWS SDK v2 para S3 y SQS.
 
 ```bash
 go run ./cmd                    # desarrollo; carga .env si existe
@@ -23,7 +23,8 @@ sqlc generate                   # después de cambiar schema/queries
 
 Ejecutar comandos desde esta carpeta. No editar ni versionar `.env`; `.env.example` es
 la referencia. Según la feature se requieren `DB_URL`, `SECRET_KEY`, `SPA_URL`,
-`AWS_S3_BUCKET` y credenciales/región AWS.
+`AWS_S3_BUCKET` y credenciales/región AWS. La cola de recomendaciones está apagada por
+defecto; sus variables y el arranque local están en `docs/recommendation-queue.md`.
 
 ## Arquitectura
 
@@ -42,10 +43,22 @@ la referencia. Según la feature se requieren `DB_URL`, `SECRET_KEY`, `SPA_URL`,
   sin productor, worker ni endpoints).
 - Transversales: `internal/auth` (JWT, Argon2id, `UserRole`), `internal/files` (PDFs),
   `internal/uploader` (S3), `internal/scoring` (contrato inyectable de scoring),
+  `internal/queue` (configuración y puerto de la cola SQS de recomendaciones),
   `internal/*.go` (helpers de respuesta y validación).
 - `internal/scoring` define el contrato, **no** el algoritmo: su única implementación de
   producción es `Unavailable`, que falla con `ErrScoringUnavailable`. No inventar puntajes
   ni cablearla en `cmd/api.go`; el consumidor es el worker de LAB-33.
+- `internal/queue` configura el transporte y expone el puerto `Client`; **no** publica ni
+  consume. El productor es LAB-32 y el worker LAB-33. `RECOMMENDATIONS_QUEUE_ENABLED`
+  decide si participa del arranque: apagado, `cmd` inyecta `queue.Disabled`, que falla con
+  `ErrQueueDisabled` en vez de simular éxito; encendido, toda variable obligatoria faltante
+  o fuera de rango aborta el arranque con un mensaje que nombra la variable y nunca su
+  valor. La entrega es al menos una vez: todo consumidor debe ser idempotente. Para tests,
+  usar el doble de `internal/queue/queuetest`, nunca AWS real.
+- Divergencia conocida entre `internal/queue` e `internal/uploader`: `queue` exige
+  `AWS_REGION` y devuelve error, `uploader` cae a `us-east-2` y aborta con `log.Fatal`
+  dentro del paquete. En código nuevo seguir el patrón de `queue` —configuración validada
+  con lookup inyectable y error propagado a `cmd`—; migrar `uploader` es un cambio aparte.
 
 Mantener el flujo `route -> middleware -> handler -> service -> store/repository`.
 Preferir cambios locales a crear capas nuevas.

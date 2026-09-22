@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-22
+goal: Configurar y validar el transporte SQS de recomendaciones con fail-fast,
+  puerto sustituible por fake y composicion en cmd sin globals
