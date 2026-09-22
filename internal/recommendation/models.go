@@ -124,3 +124,16 @@ type Page struct {
 	Limit  int32
 	Offset int32
 }
+
+// id devuelve el identificador del sujeto sin importar su tipo. Sirve para diagnóstico: un
+// sujeto inválido no tiene identificador y devuelve cero.
+func (s Subject) id() int32 {
+	switch {
+	case s.EmployeeID != nil:
+		return *s.EmployeeID
+	case s.JobPositionID != nil:
+		return *s.JobPositionID
+	default:
+		return 0
+	}
+}

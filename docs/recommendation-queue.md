@@ -12,9 +12,13 @@ variables del entorno desplegado.
 Implementado en LAB-31: configuración validada, puerto `queue.Client`, implementación sobre
 SQS, implementación deshabilitada y doble en memoria para tests.
 
-Todavía **no** implementado: quién publica (LAB-32), quién consume y completa batches
-(LAB-33) y los disparadores del dominio (LAB-34). Hoy el cliente se construye en el arranque
-y no tiene consumidor.
+Implementado en LAB-32: el productor. `recommendation.QueueJobPublisher` abre el batch
+`pending` del sujeto y publica el mensaje que lo referencia; `recommendation.JobPublisher` es
+el puerto con el que el dominio lo consume.
+
+Todavía **no** implementado: quién consume y completa batches (LAB-33) y los disparadores del
+dominio (LAB-34). El productor existe pero **nadie lo llama**: `cmd/api.go` sigue cableando
+`jobposition.NoopEventPublisher{}`, así que hoy ninguna ruta publica nada.
 
 ## Variables de entorno
 
@@ -176,8 +180,56 @@ fake.FailSend(errors.New("boom"))  // fuerza el fallo de una operación
 Es un paquete normal y no un `_test.go` porque sus consumidores viven en otros paquetes. No
 entra al binario: ninguna ruta de producción lo importa.
 
+## Contrato del mensaje
+
+El transporte no interpreta el cuerpo: lo define `internal/recommendation`. Un mensaje es un
+**sobre de ruteo**, no una copia del dominio.
+
+```json
+{
+  "event_id": "11111111-1111-1111-1111-111111111111",
+  "version": 1,
+  "subject_type": "employee",
+  "subject_id": 12,
+  "batch_id": 77,
+  "emitted_at": "2026-09-22T15:34:56Z"
+}
+```
+
+| Campo | Para qué |
+| --- | --- |
+| `event_id` | Identifica esta emisión. Distinto en cada una, incluso para el mismo sujeto; dos entregas del mismo mensaje lo conservan. |
+| `version` | Versión del contrato. Un consumidor que no la implementa rechaza el mensaje en vez de interpretarlo mal. Entero monótono: un cambio incompatible lo sube. |
+| `subject_type` | `employee` o `job_position`. Es lo que da sentido a `subject_id`. |
+| `subject_id` | Identificador del empleado o del puesto. Uno solo: a diferencia del batch en la base, el mensaje no repite el par excluyente. |
+| `batch_id` | Identifica el trabajo a ejecutar. Le alcanza a un consumidor idempotente para decidir si ya lo hizo. |
+| `emitted_at` | Instante de emisión, siempre en UTC. |
+
+**El mensaje no lleva datos personales, credenciales ni el perfil del empleado o la
+descripción del puesto.** El consumidor resuelve desde la base todo lo que necesite a partir
+de los identificadores. Agregar un campo acá es agregarlo a algo que viaja fuera del proceso
+y queda en la cola.
+
+### Desenlaces de una emisión
+
+| Situación | Qué pasa |
+| --- | --- |
+| El sujeto no tiene trabajo en curso | Se abre un batch `pending` y se publica su mensaje. |
+| El sujeto ya tiene un batch `pending` o `processing` | No se publica nada y la emisión se resuelve **sin error**: el trabajo en curso ya va a producir el conjunto. Queda una línea de diagnóstico. |
+| Falla la apertura del batch | No se publica nada y el error se propaga. |
+| Falla la publicación | El batch recién abierto pasa a `failed` y el error se propaga. El sujeto no queda bloqueado: la próxima solicitud abre un batch nuevo. |
+| El transporte está deshabilitado | Igual que un fallo de publicación. Reportar éxito sin haber enviado nada sería mentir. |
+
+El orden importa: **primero el batch, después el mensaje.** Ningún mensaje puede referirse a
+un batch inexistente. No hay reintento de publicación: un fallo cierra el batch en `failed` y
+termina ahí.
+
+Queda una ventana conocida sin cubrir: si el proceso muere entre abrir el batch y publicar,
+ese batch queda `pending` sin mensaje y bloquea al sujeto. Cerrarla exige un outbox
+transaccional, desproporcionado para el volumen actual.
+
 ## Referencias
 
-- Épica LAB-17 y ticket LAB-31.
-- Cambio OpenSpec `configure-recommendation-queue`, capacidad
-  `recommendation-queue-configuration`.
+- Épica LAB-17 y tickets LAB-31 y LAB-32.
+- Cambios OpenSpec `configure-recommendation-queue` y `publish-recommendation-jobs`,
+  capacidades `recommendation-queue-configuration` y `recommendation-job-publishing`.
