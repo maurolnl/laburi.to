@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/employee"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/employer"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/jobposition"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/queue"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/timezone"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/uploader"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/user"
@@ -19,6 +21,10 @@ import (
 
 type application struct {
 	config appConfig
+	// queueClient es el transporte de recomendaciones. Todavía no tiene consumidor: el
+	// productor llega con LAB-32 y el worker con LAB-33. Vive acá, y no como global, para que
+	// esos tickets lo reciban inyectado.
+	queueClient queue.Client
 }
 
 type s3Config struct {
@@ -30,6 +36,7 @@ type appConfig struct {
 	db        dbConfig
 	s3Cfg     s3Config
 	secretKey string
+	queueCfg  queue.Config
 }
 
 type dbConfig struct {
@@ -83,6 +90,24 @@ func (app *application) mountFeatureRoutes(mux *http.ServeMux, psqlDB *sql.DB) {
 	tzHandler := timezone.NewHandler(tzService)
 
 	tzHandler.RegisterRoutes(mux, app.config.secretKey)
+}
+
+// mountQueue construye el transporte de recomendaciones y lo deja disponible en la
+// aplicación. Devuelve error en vez de abortar: quien decide terminar el proceso es main.
+func (app *application) mountQueue(ctx context.Context) error {
+	client, err := queue.New(ctx, app.config.queueCfg)
+	if err != nil {
+		return err
+	}
+
+	app.queueClient = client
+
+	// Una única línea de diagnóstico, sin URL de cola, región ni credenciales. Con el
+	// transporte deshabilitado nadie recibe recomendaciones, y eso debe ser visible en el
+	// arranque en vez de descubrirse por ausencia de resultados.
+	log.Printf("Recommendation queue enabled: %t \n", app.config.queueCfg.Enabled)
+
+	return nil
 }
 
 func (app *application) mountDB() *sql.DB {
