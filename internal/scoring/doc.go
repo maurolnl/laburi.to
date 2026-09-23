@@ -21,4 +21,10 @@
 //
 // Un fallo de la implementación es una cuarta cosa, distinta de las tres anteriores: el
 // par no llegó a evaluarse.
+//
+// Availability agrega la quinta y última: saber de antemano que la evaluación no va a poder
+// ocurrir, sin haber pasado ningún par. Unavailable la implementa; el resto no está obligado.
+// Sirve a quien necesita decidir antes de comprometer estado, que es el caso del worker de
+// LAB-33: descubrir la indisponibilidad recién al puntuar lo obligaría a marcar el batch como
+// en ejecución para después fallarlo.
 package scoring

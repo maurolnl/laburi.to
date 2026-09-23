@@ -1,10 +1,7 @@
 package scoring
 
 import (
-	"reflect"
 	"testing"
-
-	"github.com/maurolnl/bolsa-de-trabajo-back/internal/recommendation"
 )
 
 func hours(value int16) *int16 { return &value }
@@ -67,26 +64,6 @@ func TestEmployeeProfileAbsenceDiffersFromZeroValue(t *testing.T) {
 	}
 	if absent.HighestEducation != nil {
 		t.Error("an employee that did not complete the education step must have no level")
-	}
-}
-
-// El par conserva lo único que la persistencia necesita para guardar el resultado: los
-// dos identificadores. Sin ellos, el llamador tendría que correlacionar resultados con
-// entradas por posición.
-func TestPairKeepsIdentifiersNeededByPersistence(t *testing.T) {
-	pair := samplePair()
-
-	employeeID, jobPositionID := pair.IDs()
-	if employeeID != 7 || jobPositionID != 42 {
-		t.Fatalf("IDs() = (%d, %d), want (7, 42)", employeeID, jobPositionID)
-	}
-
-	candidate := recommendation.Candidate{
-		EmployeeID:    employeeID,
-		JobPositionID: jobPositionID,
-	}
-	if candidate.EmployeeID != 7 || candidate.JobPositionID != 42 {
-		t.Fatal("a candidate must be buildable from the pair alone")
 	}
 }
 
@@ -190,46 +167,5 @@ func TestScoredAcceptsPartialIndicatorSets(t *testing.T) {
 	partial := Scored(pair, 0.5, Indicator{Name: "experience", Weight: 1, Value: 0.5})
 	if len(partial.Indicators) != 1 {
 		t.Error("an implementation may report only the indicators it computed")
-	}
-}
-
-// El criterio de aceptación pide que incorporar indicadores no cambie el transporte ni el
-// esquema principal. Este test lo fija: al construir el Candidate que se persiste, solo
-// viaja el total.
-func TestResultToCandidateCarriesOnlyTheTotal(t *testing.T) {
-	result := Scored(
-		samplePair(),
-		0.82,
-		Indicator{Name: "experience", Weight: 0.6, Value: 0.9},
-		Indicator{Name: "timezone", Weight: 0.4, Value: 0.7},
-	)
-
-	candidate := recommendation.Candidate{
-		EmployeeID:    result.EmployeeID,
-		JobPositionID: result.JobPositionID,
-		Score:         result.Total,
-	}
-
-	if candidate.Score == nil || *candidate.Score != 0.82 {
-		t.Fatalf("Score = %v, want 0.82", candidate.Score)
-	}
-
-	fields := reflect.VisibleFields(reflect.TypeOf(candidate))
-	if len(fields) != 3 {
-		t.Fatalf("recommendation.Candidate has %d fields; indicators must not have leaked into the schema", len(fields))
-	}
-}
-
-func TestUnscoredResultMapsToCandidateWithoutScore(t *testing.T) {
-	result := Unscored(samplePair())
-
-	candidate := recommendation.Candidate{
-		EmployeeID:    result.EmployeeID,
-		JobPositionID: result.JobPositionID,
-		Score:         result.Total,
-	}
-
-	if candidate.Score != nil {
-		t.Fatal("an unscored result must persist without a score")
 	}
 }

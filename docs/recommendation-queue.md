@@ -16,15 +16,27 @@ Implementado en LAB-32: el productor. `recommendation.QueueJobPublisher` abre el
 `pending` del sujeto y publica el mensaje que lo referencia; `recommendation.JobPublisher` es
 el puerto con el que el dominio lo consume.
 
-Todavía **no** implementado: quién consume y completa batches (LAB-33) y los disparadores del
-dominio (LAB-34). El productor existe pero **nadie lo llama**: `cmd/api.go` sigue cableando
+Implementado en LAB-33: el consumidor. `recommendation.Worker` recibe los mensajes, resuelve
+el universo de candidatos activos, invoca el contrato de scoring y reemplaza el conjunto
+vigente en una transacción, reconociendo el mensaje solo después de persistir el desenlace.
+Arranca como goroutine del mismo binario, detrás de `RECOMMENDATIONS_WORKER_ENABLED`.
+
+Todavía **no** implementados: los disparadores del dominio (LAB-34) y los endpoints de
+consulta (LAB-35). El productor existe pero **nadie lo llama**: `cmd/api.go` sigue cableando
 `jobposition.NoopEventPublisher{}`, así que hoy ninguna ruta publica nada.
+
+**Mientras el algoritmo de indicadores no exista, todo batch con candidatos termina en
+`failed`.** La única implementación de producción del contrato de scoring es
+`scoring.Unavailable`, y es la que `cmd/api.go` le inyecta al worker. Es el comportamiento
+que la épica LAB-17 pide —la generación está bloqueada hasta que exista el algoritmo— y no un
+defecto. Un sujeto sin candidatos sí completa, con conjunto vacío.
 
 ## Variables de entorno
 
 | Variable | Obligatoria | Default | Rango |
 | --- | --- | --- | --- |
-| `RECOMMENDATIONS_QUEUE_ENABLED` | no | `false` | booleano que entienda Go (`true`, `false`, `1`, `0`) |
+| `RECOMMENDATIONS_QUEUE_ENABLED` | no | `false` | booleano que entienda Go (`true`, `false`, `1`, `0`); ilegible ⇒ `false` con advertencia |
+| `RECOMMENDATIONS_WORKER_ENABLED` | no | `false` | ídem |
 | `AWS_REGION` | sí, con la cola habilitada | — | no vacío |
 | `AWS_SQS_RECOMMENDATIONS_QUEUE_URL` | sí, con la cola habilitada | — | no vacío |
 | `AWS_SQS_RECOMMENDATIONS_DLQ_URL` | sí, con la cola habilitada | — | no vacío |
@@ -38,6 +50,12 @@ Notas:
 
 - **Un valor vacío o solo con espacios equivale a ausente.** Para las obligatorias eso aborta
   el arranque; para las opcionales, aplica el default.
+- **Los dos interruptores nunca abortan el arranque.** Un valor que no se pueda interpretar
+  —`si`, `yes`, `on`— los deja **apagados** y produce una advertencia en el log que nombra la
+  variable. Describen *si* la funcionalidad participa, no *cómo*, y una funcionalidad apagada
+  no debe impedir que la aplicación levante. El resto sí aborta: con la cola habilitada, una
+  variable obligatoria ausente o un valor numérico fuera de rango describen cómo participa un
+  transporte encendido, y adivinarlos haría desaparecer mensajes.
 - **`AWS_REGION` se comparte con S3.** `internal/uploader` la trata como opcional y cae a
   `us-east-2`; acá es obligatoria con la cola habilitada. La divergencia es deliberada: un
   bucket en la región equivocada da error visible, pero una cola en la región equivocada
@@ -46,6 +64,12 @@ Notas:
   throttling. No tiene relación con `maxReceiveCount`, que es un atributo de la cola en AWS.
 - **No hay credenciales nuevas.** El SDK resuelve las mismas que ya usa S3 por la cadena
   estándar (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, perfil, o rol de la instancia).
+- **`RECOMMENDATIONS_WORKER_ENABLED` es independiente de `RECOMMENDATIONS_QUEUE_ENABLED`.**
+  Publicar y consumir son decisiones de despliegue distintas: una instancia puede emitir sin
+  dedicar su proceso a procesar. Se resuelve con `queue.LoadWorkerConfig`, aparte de
+  `queue.LoadConfig`, porque con el transporte apagado `LoadConfig` no lee ninguna otra
+  variable. Con el worker encendido y el transporte apagado el ciclo **no arranca** y el
+  arranque lo registra: no hay de dónde consumir.
 
 ## Arranque local
 
@@ -228,8 +252,67 @@ Queda una ventana conocida sin cubrir: si el proceso muere entre abrir el batch 
 ese batch queda `pending` sin mensaje y bloquea al sujeto. Cerrarla exige un outbox
 transaccional, desproporcionado para el volumen actual.
 
+## Consumo del mensaje
+
+`recommendation.Worker` procesa un mensaje en este orden. No es arbitrario: los candidatos se
+resuelven con el batch todavía en `pending` para que los dos desenlaces que no prosperan
+—universo vacío y scoring no disponible— no abran `processing`. Abrirlo dejaría al sujeto
+bloqueado por el índice único parcial ante cualquier fallo posterior.
+
+1. Interpretar el cuerpo y validar su `version`.
+2. Leer el batch. Inexistente o ya terminal: reconocer sin trabajo.
+3. Resolver el universo de candidatos activos del sujeto.
+4. Universo vacío: reclamar, completar con lista vacía, reconocer. **No se consulta el
+   scoring.**
+5. Con candidatos y scoring no disponible: `pending` → `failed`, reconocer.
+6. Con candidatos y scoring disponible: reclamar (`processing`), puntuar, reemplazar el
+   conjunto, reconocer.
+
+### Idempotencia
+
+El reclamo del batch es condicional: solo prospera desde `pending` o `processing`. Un
+redelivery de un batch ya `completed` o `failed` no lo reabre, así que el conjunto vigente que
+dejó queda intacto.
+
+El predicado incluye `processing` a propósito. Excluirlo haría el reclamo estrictamente
+exclusivo, pero convertiría cualquier caída del worker a mitad de un batch en un sujeto
+bloqueado para siempre. Que dos entregas se solapen es inocuo: completar un batch es un
+reemplazo atómico completo y el último en commitear gana. El worker renueva la visibilidad del
+mensaje mientras procesa, lo que reduce esa ventana.
+
+### Clasificación de errores
+
+| Situación | Batch | Mensaje |
+| --- | --- | --- |
+| Cuerpo ilegible o versión desconocida | no se toca | reconocer |
+| Batch inexistente o ya terminal | no se toca | reconocer |
+| Sujeto inexistente o puesto eliminado | `completed` vacío | reconocer |
+| Sin candidatos | `completed` vacío | reconocer |
+| Scoring no disponible | `pending` → `failed` | reconocer |
+| Par inválido o fallo de scoring | `failed` | reconocer |
+| Fallo de base de datos | como haya quedado | **no** reconocer |
+| Fallo del propio reconocimiento | ya persistido | el redelivery lo reconoce |
+
+La línea divisoria es si reintentar puede cambiar el desenlace. Un cuerpo ilegible se lee
+igual de mal la décima vez: devolverlo a la cola solo consume entregas hasta la DLQ y demora
+los mensajes sanos que vienen detrás. Un fallo de base de datos sí puede resolverse solo, así
+que el mensaje vuelve, y si nunca se resuelve el `maxReceiveCount` de la cola lo deriva a la
+DLQ.
+
+**Scoring no disponible se reconoce y no se reintenta**, aunque parezca recuperable. Mientras
+el algoritmo no exista, reintentar llevaría todo el tráfico a la DLQ y dejaría al sujeto
+esperando; con el batch en `failed` el sujeto queda libre para una solicitud nueva, y el
+rastro del motivo queda donde se puede consultar.
+
+### Deuda conocida
+
+Un empleado se empareja contra **todos** los puestos vigentes, y un puesto contra todos los
+empleados, sin cota. Con el volumen actual no es un problema, y acotarlo bien exige los
+filtros duros que la épica prohíbe definir mientras no exista el algoritmo.
+
 ## Referencias
 
-- Épica LAB-17 y tickets LAB-31 y LAB-32.
-- Cambios OpenSpec `configure-recommendation-queue` y `publish-recommendation-jobs`,
-  capacidades `recommendation-queue-configuration` y `recommendation-job-publishing`.
+- Épica LAB-17 y tickets LAB-31, LAB-32 y LAB-33.
+- Cambios OpenSpec `configure-recommendation-queue`, `publish-recommendation-jobs` y
+  `consume-recommendation-jobs`; capacidades `recommendation-queue-configuration`,
+  `recommendation-job-publishing` y `recommendation-job-consumption`.

@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/maurolnl/bolsa-de-trabajo-back/cmd/middleware"
@@ -14,6 +16,8 @@ import (
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/employer"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/jobposition"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/queue"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/recommendation"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/scoring"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/timezone"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/uploader"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/user"
@@ -21,10 +25,11 @@ import (
 
 type application struct {
 	config appConfig
-	// queueClient es el transporte de recomendaciones. Todavía no tiene consumidor: el
-	// productor llega con LAB-32 y el worker con LAB-33. Vive acá, y no como global, para que
-	// esos tickets lo reciban inyectado.
+	// queueClient es el transporte de recomendaciones, y db la conexión que comparten las
+	// rutas y el worker. Viven acá, y no como globales, para que quien las necesite las
+	// reciba inyectadas.
 	queueClient queue.Client
+	db          *sql.DB
 }
 
 type s3Config struct {
@@ -37,6 +42,7 @@ type appConfig struct {
 	s3Cfg     s3Config
 	secretKey string
 	queueCfg  queue.Config
+	workerCfg queue.WorkerConfig
 }
 
 type dbConfig struct {
@@ -47,6 +53,7 @@ func (app *application) mount() http.Handler {
 	mux := http.NewServeMux()
 
 	psqlDB := app.mountDB()
+	app.db = psqlDB
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("laburito!"))
@@ -107,7 +114,48 @@ func (app *application) mountQueue(ctx context.Context) error {
 	// arranque en vez de descubrirse por ausencia de resultados.
 	log.Printf("Recommendation queue enabled: %t \n", app.config.queueCfg.Enabled)
 
+	// Las advertencias distinguen un apagado deliberado de uno causado por un interruptor mal
+	// escrito. Sin ellas los dos se verían igual en el log de arriba.
+	app.logQueueWarnings()
+
 	return nil
+}
+
+func (app *application) logQueueWarnings() {
+	for _, warning := range append(app.config.queueCfg.Warnings, app.config.workerCfg.Warnings...) {
+		log.Printf("Recommendation configuration warning: %s \n", warning)
+	}
+}
+
+// startWorker arranca el consumidor de recomendaciones si esta instancia debe consumir.
+//
+// El worker es una goroutine de este mismo proceso y no un binario aparte: la separación que
+// importa es que el ciclo de consumo no comparta el camino de request, y la lógica vive en
+// internal/recommendation, así que extraerlo a su propio main más adelante es mover un
+// entrypoint y no rediseñar.
+//
+// Se le inyecta scoring.Unavailable: el algoritmo de indicadores no existe y la épica prohíbe
+// simularlo, así que todo batch con candidatos va a terminar en failed. Eso es el
+// comportamiento pedido y no un defecto.
+//
+// El contexto es el del proceso: cancelarlo corta la recepción en curso y termina el ciclo.
+func (app *application) startWorker(ctx context.Context) {
+	should, reason := app.config.workerCfg.ShouldConsume(app.config.queueCfg)
+	log.Printf("%s \n", reason)
+	if !should {
+		return
+	}
+
+	repo := recommendation.NewRepository(app.db)
+	worker := recommendation.NewWorker(
+		repo,
+		repo,
+		app.queueClient,
+		scoring.Unavailable{},
+		app.config.queueCfg.VisibilityTimeoutSeconds,
+	)
+
+	go worker.Run(ctx)
 }
 
 func (app *application) mountDB() *sql.DB {
@@ -121,13 +169,41 @@ func (app *application) mountDB() *sql.DB {
 	return db
 }
 
-func (app *application) run(h http.Handler) error {
+// shutdownGrace es lo que se le da a las peticiones en curso para terminar antes de cerrar.
+// Acotado a propósito: un plazo largo retrasa cada deploy sin beneficio, porque los handlers
+// de esta API son cortos.
+const shutdownGrace = 10 * time.Second
+
+// run atiende hasta que el contexto se cancela y recién entonces cierra el servidor.
+//
+// El apagado explícito es obligatorio y no un lujo: atender la señal con signal.NotifyContext
+// desactiva la terminación por defecto del proceso, y ListenAndServe no mira el contexto. Sin
+// este cierre, un SIGTERM cancelaría el worker y dejaría el proceso sirviendo para siempre,
+// hasta que el orquestador lo matara al vencer su propio plazo.
+func (app *application) run(ctx context.Context, h http.Handler) error {
 	server := &http.Server{
 		Addr:    app.config.addr,
 		Handler: h,
 	}
 
+	closed := make(chan error, 1)
+	go func() {
+		<-ctx.Done()
+
+		// El plazo de gracia se desprende de la cancelación que lo disparó: usar el contexto
+		// ya cancelado abortaría el cierre de inmediato, que es lo contrario de ordenado.
+		grace, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownGrace)
+		defer cancel()
+
+		log.Printf("Shutting down, draining requests for up to %s \n", shutdownGrace)
+		closed <- server.Shutdown(grace)
+	}()
+
 	log.Printf("Server listening on %s \n", app.config.addr)
 
-	return server.ListenAndServe()
+	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+
+	return <-closed
 }

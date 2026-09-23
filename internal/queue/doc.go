@@ -8,6 +8,13 @@
 // cambios posteriores que consumen este paquete. Por eso Send recibe un cuerpo ya
 // serializado: qué contiene lo decide el productor, no el transporte.
 //
+// LAB-33 suma WorkerConfig y LoadWorkerConfig. Son un tipo y una función aparte de Config y
+// LoadConfig a propósito: consumir no es transporte, es qué hace una instancia con él, y
+// meterlo en LoadConfig rompería la garantía de que con la cola apagada no se lee ninguna
+// otra variable. ShouldConsume resuelve la decisión de arranque, que tiene tres desenlaces y
+// no dos: apagado a propósito, encendido sin transporte —un despliegue mal armado, visible en
+// el log— y encendido.
+//
 // El paquete no importa internal/recommendation, internal/jobposition ni internal/employee:
 // no conoce el dominio que viaja en los mensajes.
 //

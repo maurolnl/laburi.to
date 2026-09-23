@@ -37,6 +37,9 @@ func TestLoadConfigDisabledDoesNotReadAnyOtherVariable(t *testing.T) {
 		{name: "flag blank", value: "   ", set: true},
 		{name: "flag false", value: "false", set: true},
 		{name: "flag zero", value: "0", set: true},
+		// Un interruptor ilegible cuenta como apagado, así que tampoco habilita la lectura
+		// del resto de la configuración.
+		{name: "flag unreadable", value: "yes", set: true},
 	}
 
 	for _, tt := range tests {
@@ -65,14 +68,61 @@ func TestLoadConfigDisabledDoesNotReadAnyOtherVariable(t *testing.T) {
 
 // Un typo en el flag no debe apagar la cola en silencio: ese es exactamente el modo de fallo
 // que el ticket quiere evitar.
-func TestLoadConfigRejectsUnparseableFlag(t *testing.T) {
-	_, err := LoadConfig(envLookup(map[string]string{EnvEnabled: "yes"}))
-
-	if !errors.Is(err, ErrInvalidQueueConfig) {
-		t.Fatalf("LoadConfig() = %v, want ErrInvalidQueueConfig", err)
+// Un interruptor ilegible describe si la funcionalidad participa, no cómo: degrada a apagado
+// y no derriba el arranque. La advertencia es lo que evita que el typo pase inadvertido.
+func TestLoadConfigLeavesAnUnreadableSwitchDisabled(t *testing.T) {
+	cfg, err := LoadConfig(envLookup(map[string]string{EnvEnabled: "yes"}))
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v, an unreadable switch must not abort startup", err)
 	}
-	if !strings.Contains(err.Error(), EnvEnabled) {
-		t.Errorf("the error must name %s, got %q", EnvEnabled, err)
+	if cfg.Enabled {
+		t.Fatal("an unreadable switch must leave the transport disabled")
+	}
+	if len(cfg.Warnings) != 1 {
+		t.Fatalf("Warnings = %v, want exactly one", cfg.Warnings)
+	}
+	if !strings.Contains(cfg.Warnings[0], EnvEnabled) {
+		t.Fatalf("the warning must name %s, got %q", EnvEnabled, cfg.Warnings[0])
+	}
+}
+
+func TestLoadWorkerConfigLeavesAnUnreadableSwitchDisabled(t *testing.T) {
+	cfg, err := LoadWorkerConfig(envLookup(map[string]string{EnvWorkerEnabled: "si"}))
+	if err != nil {
+		t.Fatalf("LoadWorkerConfig() error = %v, an unreadable switch must not abort startup", err)
+	}
+	if cfg.Enabled {
+		t.Fatal("an unreadable switch must leave the worker disabled")
+	}
+	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], EnvWorkerEnabled) {
+		t.Fatalf("Warnings = %v, want one naming %s", cfg.Warnings, EnvWorkerEnabled)
+	}
+}
+
+// Apagar a propósito no es una degradación: no hay nada que corregir y no debe advertirse.
+func TestDeliberatelyDisabledSwitchesWarnAboutNothing(t *testing.T) {
+	for _, value := range []struct {
+		name string
+		env  map[string]string
+	}{
+		{name: "absent", env: map[string]string{}},
+		{name: "empty", env: map[string]string{EnvEnabled: "", EnvWorkerEnabled: ""}},
+		{name: "blank", env: map[string]string{EnvEnabled: "   ", EnvWorkerEnabled: "   "}},
+		{name: "false", env: map[string]string{EnvEnabled: "false", EnvWorkerEnabled: "0"}},
+	} {
+		t.Run(value.name, func(t *testing.T) {
+			cfg, err := LoadConfig(envLookup(value.env))
+			if err != nil {
+				t.Fatalf("LoadConfig() error = %v", err)
+			}
+			workerCfg, err := LoadWorkerConfig(envLookup(value.env))
+			if err != nil {
+				t.Fatalf("LoadWorkerConfig() error = %v", err)
+			}
+			if len(cfg.Warnings) != 0 || len(workerCfg.Warnings) != 0 {
+				t.Fatalf("no warning expected, got %v and %v", cfg.Warnings, workerCfg.Warnings)
+			}
+		})
 	}
 }
 
@@ -259,14 +309,28 @@ func TestLoadConfigEndpointIsOptional(t *testing.T) {
 func TestLoadConfigErrorsNeverLeakValues(t *testing.T) {
 	const secret = "AKIAIOSFODNN7EXAMPLE-super-secret"
 
+	// La advertencia del interruptor sigue la misma regla que los errores: nombra la variable
+	// y nunca su valor.
+	t.Run("switch warning", func(t *testing.T) {
+		cfg, err := LoadConfig(envLookup(map[string]string{EnvEnabled: secret}))
+		if err != nil {
+			t.Fatalf("LoadConfig() error = %v", err)
+		}
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("Warnings = %v, want exactly one", cfg.Warnings)
+		}
+		if strings.Contains(cfg.Warnings[0], secret) {
+			t.Fatalf("the warning leaked the value: %q", cfg.Warnings[0])
+		}
+		if !strings.Contains(cfg.Warnings[0], EnvEnabled) {
+			t.Fatalf("the warning must name %s, got %q", EnvEnabled, cfg.Warnings[0])
+		}
+	})
+
 	tests := []struct {
 		name string
 		env  map[string]string
 	}{
-		{
-			name: "unparseable flag",
-			env:  map[string]string{EnvEnabled: secret},
-		},
 		{
 			name: "invalid numeric value",
 			env: func() map[string]string {
@@ -333,5 +397,99 @@ func TestLoadConfigKeepsRequiredValues(t *testing.T) {
 	}
 	if cfg.DLQURL != enabledEnv()[EnvDLQURL] {
 		t.Errorf("DLQURL = %q, want the declared dead letter queue URL", cfg.DLQURL)
+	}
+}
+
+// El flag del worker es independiente del del transporte: una instancia puede querer emitir
+// sin consumir, y la configuración tiene que poder expresar las cuatro combinaciones.
+func TestLoadWorkerConfigIsIndependentOfTheTransport(t *testing.T) {
+	tests := []struct {
+		name         string
+		transport    string
+		worker       string
+		wantEnabled  bool
+		wantWorkerOn bool
+	}{
+		{name: "both off", transport: "false", worker: "false"},
+		{name: "transport on, worker off", transport: "true", worker: "false", wantEnabled: true},
+		{name: "transport on, worker on", transport: "true", worker: "true", wantEnabled: true, wantWorkerOn: true},
+		// Consumir sin transporte es una combinación declarable y sin efecto: quien monta el
+		// worker comprueba las dos cosas y explica por qué no arranca.
+		{name: "transport off, worker on", transport: "false", worker: "true", wantWorkerOn: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			env := enabledEnv()
+			env[EnvEnabled] = test.transport
+			env[EnvWorkerEnabled] = test.worker
+
+			cfg, err := LoadConfig(envLookup(env))
+			if err != nil {
+				t.Fatalf("LoadConfig() error = %v", err)
+			}
+			workerCfg, err := LoadWorkerConfig(envLookup(env))
+			if err != nil {
+				t.Fatalf("LoadWorkerConfig() error = %v", err)
+			}
+
+			if cfg.Enabled != test.wantEnabled {
+				t.Fatalf("Enabled = %v, want %v", cfg.Enabled, test.wantEnabled)
+			}
+			if workerCfg.Enabled != test.wantWorkerOn {
+				t.Fatalf("WorkerConfig.Enabled = %v, want %v", workerCfg.Enabled, test.wantWorkerOn)
+			}
+		})
+	}
+}
+
+func TestLoadWorkerConfigDefaultsToOff(t *testing.T) {
+	cfg, err := LoadWorkerConfig(envLookup(enabledEnv()))
+	if err != nil {
+		t.Fatalf("LoadWorkerConfig() error = %v", err)
+	}
+	if cfg.Enabled {
+		t.Fatal("the worker must stay off unless it is explicitly enabled")
+	}
+}
+
+// Las tres decisiones de arranque del consumidor, sin necesidad de montar la aplicación.
+func TestShouldConsumeCoversEveryFlagCombination(t *testing.T) {
+	tests := []struct {
+		name      string
+		transport bool
+		worker    bool
+		want      bool
+	}{
+		{name: "both off", transport: false, worker: false, want: false},
+		{name: "transport on, worker off", transport: true, worker: false, want: false},
+		{name: "transport off, worker on", transport: false, worker: true, want: false},
+		{name: "both on", transport: true, worker: true, want: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			should, reason := WorkerConfig{Enabled: test.worker}.ShouldConsume(Config{Enabled: test.transport})
+			if should != test.want {
+				t.Fatalf("ShouldConsume() = %v, want %v", should, test.want)
+			}
+			if reason == "" {
+				t.Fatal("every decision must carry a reason for the startup log")
+			}
+		})
+	}
+}
+
+// Encendido sin transporte no es lo mismo que apagado: el primero es un despliegue mal
+// armado y su motivo tiene que decirlo.
+func TestShouldConsumeDistinguishesADisabledWorkerFromAMissingTransport(t *testing.T) {
+	_, off := WorkerConfig{Enabled: false}.ShouldConsume(Config{Enabled: true})
+	_, orphan := WorkerConfig{Enabled: true}.ShouldConsume(Config{Enabled: false})
+
+	if off == orphan {
+		t.Fatalf("both reasons read the same: %q", off)
+	}
+	if !strings.Contains(orphan, "queue is disabled") {
+		t.Fatalf("the reason must name the missing transport, got %q", orphan)
 	}
 }

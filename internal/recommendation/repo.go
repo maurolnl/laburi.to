@@ -9,6 +9,7 @@ import (
 
 	"github.com/lib/pq"
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/database"
+	"github.com/maurolnl/bolsa-de-trabajo-back/internal/scoring"
 )
 
 // scoreScale es la escala declarada en NUMERIC(7,4). Formatear con exactamente esa
@@ -18,6 +19,12 @@ const scoreScale = 4
 type recommendationQueries interface {
 	CreateRecommendationBatch(ctx context.Context, arg database.CreateRecommendationBatchParams) (database.RecommendationBatch, error)
 	TransitionRecommendationBatch(ctx context.Context, arg database.TransitionRecommendationBatchParams) (database.RecommendationBatch, error)
+	GetRecommendationBatch(ctx context.Context, id int32) (database.RecommendationBatch, error)
+	GetEmployeeScoringProfile(ctx context.Context, id int32) (database.GetEmployeeScoringProfileRow, error)
+	ListEmployeeScoringProfiles(ctx context.Context) ([]database.ListEmployeeScoringProfilesRow, error)
+	GetActiveJobPositionRequirements(ctx context.Context, id int32) (database.GetActiveJobPositionRequirementsRow, error)
+	ListActiveJobPositionRequirements(ctx context.Context) ([]database.ListActiveJobPositionRequirementsRow, error)
+	ClaimRecommendationBatch(ctx context.Context, id int32) (database.RecommendationBatch, error)
 	GetCurrentBatchByEmployee(ctx context.Context, employeeID sql.NullInt32) (database.RecommendationBatch, error)
 	GetCurrentBatchByJobPosition(ctx context.Context, jobPositionID sql.NullInt32) (database.RecommendationBatch, error)
 	GetLastCompletedBatchByEmployee(ctx context.Context, employeeID sql.NullInt32) (database.RecommendationBatch, error)
@@ -30,6 +37,13 @@ type RecommendationRepository struct {
 	db      *sql.DB
 	queries recommendationQueries
 }
+
+// El repositorio cumple los dos puertos que el worker consume. Las aserciones existen para
+// que una firma que se desalinee rompa la compilación acá y no en cmd.
+var (
+	_ RecommendationStore = (*RecommendationRepository)(nil)
+	_ CandidateSource     = (*RecommendationRepository)(nil)
+)
 
 func NewRepository(db *sql.DB) *RecommendationRepository {
 	return &RecommendationRepository{db: db, queries: database.New(db)}
@@ -47,6 +61,40 @@ func (r *RecommendationRepository) CreateBatch(ctx context.Context, subject Subj
 	})
 	if err != nil {
 		return Batch{}, classifyCreateBatchError(err)
+	}
+
+	return batchFromDatabase(row), nil
+}
+
+func (r *RecommendationRepository) GetBatch(ctx context.Context, batchID int32) (Batch, error) {
+	row, err := r.queries.GetRecommendationBatch(ctx, batchID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Batch{}, ErrBatchNotFound
+	}
+	if err != nil {
+		return Batch{}, fmt.Errorf("get recommendation batch: %w", err)
+	}
+
+	return batchFromDatabase(row), nil
+}
+
+// ClaimBatch traduce las cero filas del UPDATE condicional al error que corresponde. Cero
+// filas significa una de dos cosas y hay que distinguirlas, así que se vuelve a consultar el
+// batch: si existe, ya era terminal; si no, nunca hubo trabajo que reclamar.
+//
+// Esa segunda consulta no reintroduce una condición de carrera: los estados terminales son
+// definitivos, así que un batch que el UPDATE no pudo mover porque estaba completed o failed
+// no puede haber vuelto a pending entre las dos consultas.
+func (r *RecommendationRepository) ClaimBatch(ctx context.Context, batchID int32) (Batch, error) {
+	row, err := r.queries.ClaimRecommendationBatch(ctx, batchID)
+	if errors.Is(err, sql.ErrNoRows) {
+		if _, getErr := r.GetBatch(ctx, batchID); getErr != nil {
+			return Batch{}, getErr
+		}
+		return Batch{}, ErrBatchNotClaimable
+	}
+	if err != nil {
+		return Batch{}, fmt.Errorf("claim recommendation batch: %w", err)
 	}
 
 	return batchFromDatabase(row), nil
@@ -345,4 +393,109 @@ func nullInt32(value *int32) sql.NullInt32 {
 	}
 
 	return sql.NullInt32{Int32: *value, Valid: true}
+}
+
+// PairsForEmployee arma un par por cada puesto vigente. El perfil del empleado se lee una
+// sola vez y se comparte entre todos los pares: es el mismo empleado en todos.
+func (r *RecommendationRepository) PairsForEmployee(ctx context.Context, employeeID int32) ([]scoring.Pair, error) {
+	profileRow, err := r.queries.GetEmployeeScoringProfile(ctx, employeeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrSubjectNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get employee scoring profile: %w", err)
+	}
+
+	jobRows, err := r.queries.ListActiveJobPositionRequirements(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list active job position requirements: %w", err)
+	}
+
+	employee := scoring.EmployeeProfile{
+		EmployeeID:           profileRow.EmployeeID,
+		Experience:           scoring.ExperienceLevel(profileRow.YearsOfExperience),
+		HighestEducation:     highestEducation(profileRow.EducationTypes),
+		AvailableHoursPerDay: nullInt16ToPointer(profileRow.AvailableHoursPerDay),
+		Timezone:             nullStringToPointer(profileRow.Timezone),
+		TechnicalResources:   technicalResources(profileRow.PaidSoftware, profileRow.HasTechProfile),
+	}
+
+	pairs := make([]scoring.Pair, 0, len(jobRows))
+	for _, jobRow := range jobRows {
+		pairs = append(pairs, scoring.Pair{
+			Employee: employee,
+			Job: scoring.JobRequirements{
+				JobPositionID:          jobRow.JobPositionID,
+				RequiredExperience:     scoring.ExperienceLevel(jobRow.RequiredExperience),
+				RequiredEducationLevel: scoring.EducationLevel(jobRow.RequiredEducationLevel),
+				AvailableHoursPerDay:   jobRow.AvailableHoursPerDay,
+				Timezone:               jobRow.Timezone,
+				TechnicalResources:     jobRow.TechnicalResources,
+			},
+		})
+	}
+
+	return pairs, nil
+}
+
+// PairsForJobPosition es el sentido inverso. El puesto se resuelve con la consulta que
+// excluye los eliminados lógicamente, así que un puesto eliminado entre la emisión y el
+// consumo produce ErrSubjectNotFound y no un universo de candidatos para algo que ya no está.
+func (r *RecommendationRepository) PairsForJobPosition(ctx context.Context, jobPositionID int32) ([]scoring.Pair, error) {
+	jobRow, err := r.queries.GetActiveJobPositionRequirements(ctx, jobPositionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrSubjectNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get active job position requirements: %w", err)
+	}
+
+	profileRows, err := r.queries.ListEmployeeScoringProfiles(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list employee scoring profiles: %w", err)
+	}
+
+	job := scoring.JobRequirements{
+		JobPositionID:          jobRow.JobPositionID,
+		RequiredExperience:     scoring.ExperienceLevel(jobRow.RequiredExperience),
+		RequiredEducationLevel: scoring.EducationLevel(jobRow.RequiredEducationLevel),
+		AvailableHoursPerDay:   jobRow.AvailableHoursPerDay,
+		Timezone:               jobRow.Timezone,
+		TechnicalResources:     jobRow.TechnicalResources,
+	}
+
+	pairs := make([]scoring.Pair, 0, len(profileRows))
+	for _, profileRow := range profileRows {
+		pairs = append(pairs, scoring.Pair{
+			Employee: scoring.EmployeeProfile{
+				EmployeeID:           profileRow.EmployeeID,
+				Experience:           scoring.ExperienceLevel(profileRow.YearsOfExperience),
+				HighestEducation:     highestEducation(profileRow.EducationTypes),
+				AvailableHoursPerDay: nullInt16ToPointer(profileRow.AvailableHoursPerDay),
+				Timezone:             nullStringToPointer(profileRow.Timezone),
+				TechnicalResources:   technicalResources(profileRow.PaidSoftware, profileRow.HasTechProfile),
+			},
+			Job: job,
+		})
+	}
+
+	return pairs, nil
+}
+
+func nullInt16ToPointer(value sql.NullInt16) *int16 {
+	if !value.Valid {
+		return nil
+	}
+
+	hours := value.Int16
+	return &hours
+}
+
+func nullStringToPointer(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+
+	text := value.String
+	return &text
 }

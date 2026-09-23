@@ -30,3 +30,24 @@ type Scorer interface {
 	Score(ctx context.Context, pair Pair) (Result, error)
 	ScoreAll(ctx context.Context, pairs []Pair) ([]Result, error)
 }
+
+// Availability es la comprobación previa y opcional del contrato: permite saber si una
+// implementación va a poder evaluar, sin invocarla sobre ningún par.
+//
+// Es opcional a propósito. Una implementación que siempre puede evaluar no gana nada
+// escribiendo un método que devuelve nil, así que el llamador la detecta con una aserción de
+// tipo y, si no está, asume disponibilidad. Implementarla es la excepción, no la regla.
+//
+// Su fallo MUST ser el mismo ErrScoringUnavailable que produce la evaluación, para que el
+// llamador lo clasifique con un único errors.Is y no tenga que distinguir dos formas de
+// decir lo mismo.
+//
+// Existe porque el worker necesita decidir antes de marcar un batch como en ejecución.
+// Descubrir la indisponibilidad recién al puntuar lo obligaría a abrir processing para un
+// trabajo que no puede prosperar, y cada fallo de infraestructura en ese tramo dejaría al
+// sujeto bloqueado por el índice único parcial.
+type Availability interface {
+	// Available devuelve nil cuando la implementación puede evaluar. No tiene efecto sobre
+	// ningún par ni sobre ningún estado persistido.
+	Available(ctx context.Context) error
+}

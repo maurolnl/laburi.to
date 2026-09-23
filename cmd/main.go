@@ -4,6 +4,8 @@ import (
 	"context"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -25,6 +27,14 @@ func main() {
 		logErrorAndFail(err)
 	}
 
+	// El flag del consumidor se resuelve aparte del transporte: son dos decisiones de
+	// despliegue distintas, y con el transporte apagado LoadConfig no lee ninguna otra
+	// variable.
+	workerCfg, err := queue.LoadWorkerConfig(os.LookupEnv)
+	if err != nil {
+		logErrorAndFail(err)
+	}
+
 	cfg := appConfig{
 		addr:      ":" + port,
 		db:        dbConfig{},
@@ -32,19 +42,26 @@ func main() {
 		s3Cfg: s3Config{
 			bucket: s3Bucket,
 		},
-		queueCfg: queueCfg,
+		queueCfg:  queueCfg,
+		workerCfg: workerCfg,
 	}
 
 	api := application{
 		config: cfg,
 	}
 
-	if err := api.mountQueue(context.Background()); err != nil {
+	// El contexto del proceso termina con la señal de apagado. Es lo que corta la recepción
+	// en curso del worker, que de otro modo seguiría bloqueada en el long polling de la cola.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := api.mountQueue(ctx); err != nil {
 		logErrorAndFail(err)
 	}
 
 	h := api.mount()
-	if err := api.run(h); err != nil {
+	api.startWorker(ctx)
+	if err := api.run(ctx, h); err != nil {
 		logErrorAndFail(err)
 	}
 }
