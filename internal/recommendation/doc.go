@@ -2,10 +2,10 @@
 // trabajo, las ejecuciones que las generan, y emite las solicitudes de regeneración hacia
 // el transporte asíncrono.
 //
-// Alcance acumulado: la persistencia (LAB-29), el productor de solicitudes (LAB-32) y el
-// worker que las consume (LAB-33). El contrato de scoring (LAB-30) y el transporte (LAB-31)
-// viven en sus propios paquetes; los disparadores del dominio (LAB-34) conectan los bordes de
-// escritura con el productor, y los endpoints HTTP (LAB-35) son un cambio posterior.
+// Alcance acumulado: la persistencia (LAB-29), el productor de solicitudes (LAB-32), el
+// worker que las consume (LAB-33) y el borde HTTP de consulta (LAB-35). El contrato de scoring
+// (LAB-30) y el transporte (LAB-31) viven en sus propios paquetes; los disparadores del dominio
+// (LAB-34) conectan los bordes de escritura con el productor.
 //
 // # Por qué el productor vive acá
 //
@@ -45,4 +45,23 @@
 //     si el sujeto se muestra procesando, completado, vacío o con error.
 //   - El conjunto vigente son las recomendaciones del último batch completado, que puede
 //     no ser el más reciente: un batch fallido posterior no destruye el conjunto anterior.
+//
+// # El borde de consulta
+//
+// GET /employees/{employeeID}/job-recommendations y
+// GET /jobs/{jobPositionID}/employee-recommendations exponen esos dos conceptos juntos: status
+// sale del batch vigente e items del conjunto vigente.
+//
+// El cliente distingue cinco estados. Los cuatro de BatchStatus más none, que significa que el
+// sujeto nunca tuvo una generación solicitada. none no vive en BatchStatus porque ese tipo
+// replica el check de la migración 0007 y la base no conoce ese valor.
+//
+// La autorización deriva del JWT y vive en el servicio, no en un middleware: el rol determina el
+// sentido de la consulta —un employee solo consulta su perfil y un employer solo sus puestos—,
+// así que hay que comprobarlo junto con la propiedad. El identificador del path sirve
+// únicamente para detectar el acceso ajeno. La propiedad se resuelve con consultas propias del
+// paquete, para no invertir la dirección de importación hacia employee ni jobposition.
+//
+// El orden, el desempate y la exclusión de puestos eliminados son comportamiento de la
+// persistencia; el borde los expone tal cual y no reordena ni filtra.
 package recommendation

@@ -94,6 +94,13 @@ func (app *application) mountFeatureRoutes(mux *http.ServeMux, psqlDB *sql.DB) {
 	userHandler := user.BuildHandlers(database.New(psqlDB), app.config.secretKey, validator)
 	user.RegisterRoutes(mux, userHandler, app.config.secretKey)
 
+	// El repositorio de recomendaciones satisface los dos puertos que la consulta necesita —el
+	// conjunto vigente y la propiedad del sujeto—, así que el borde de lectura se arma con una
+	// sola instancia y sin depender del interruptor de la cola: consultar no emite trabajo.
+	recommendationRepo := recommendation.NewRepository(psqlDB)
+	recommendationQueryHandler := recommendation.BuildQueryHandlers(recommendationRepo, recommendationRepo)
+	recommendation.RegisterQueryRoutes(mux, recommendationQueryHandler, app.config.secretKey)
+
 	tzRepo := timezone.NewRepository(psqlDB)
 	tzService := timezone.NewService(tzRepo)
 	tzHandler := timezone.NewHandler(tzService)

@@ -48,6 +48,39 @@ func (q *Queries) ClaimRecommendationBatch(ctx context.Context, id int32) (Recom
 	return i, err
 }
 
+const countEmployeeRecommendationsForJobPosition = `-- name: CountEmployeeRecommendationsForJobPosition :one
+SELECT count(*)
+FROM recommendations r
+JOIN employees e ON e.id = r.employee_id
+JOIN job_positions j ON j.id = r.job_position_id
+WHERE r.batch_id = $1
+  AND j.deleted_at IS NULL
+`
+
+func (q *Queries) CountEmployeeRecommendationsForJobPosition(ctx context.Context, batchID int32) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countEmployeeRecommendationsForJobPosition, batchID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countJobRecommendationsForEmployee = `-- name: CountJobRecommendationsForEmployee :one
+SELECT count(*)
+FROM recommendations r
+JOIN job_positions j ON j.id = r.job_position_id
+WHERE r.batch_id = $1
+  AND j.deleted_at IS NULL
+`
+
+// Los conteos repiten exactamente los joins y filtros de sus listados. Una diferencia entre
+// ambos haría que el total describiera un conjunto distinto del que se pagina.
+func (q *Queries) CountJobRecommendationsForEmployee(ctx context.Context, batchID int32) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countJobRecommendationsForEmployee, batchID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createRecommendationBatch = `-- name: CreateRecommendationBatch :one
 INSERT INTO recommendation_batches (
     subject_type,
@@ -209,6 +242,22 @@ func (q *Queries) GetCurrentBatchByJobPosition(ctx context.Context, jobPositionI
 	return i, err
 }
 
+const getEmployeeOwner = `-- name: GetEmployeeOwner :one
+SELECT user_id
+FROM employees
+WHERE id = $1
+`
+
+// Resolución de propiedad para autorizar las consultas del borde HTTP. Viven acá y no en
+// employees.sql ni job_positions.sql porque las consume internal/recommendation, que no
+// importa los paquetes de dominio de empleado ni de puesto.
+func (q *Queries) GetEmployeeOwner(ctx context.Context, id int32) (int32, error) {
+	row := q.db.QueryRowContext(ctx, getEmployeeOwner, id)
+	var user_id int32
+	err := row.Scan(&user_id)
+	return user_id, err
+}
+
 const getEmployeeScoringProfile = `-- name: GetEmployeeScoringProfile :one
 
 SELECT e.id AS employee_id,
@@ -260,6 +309,29 @@ func (q *Queries) GetEmployeeScoringProfile(ctx context.Context, id int32) (GetE
 		&i.HasTechProfile,
 		pq.Array(&i.EducationTypes),
 	)
+	return i, err
+}
+
+const getJobPositionOwner = `-- name: GetJobPositionOwner :one
+SELECT j.employer_id, e.user_id
+FROM job_positions j
+JOIN employers e ON e.id = j.employer_id
+WHERE j.id = $1
+  AND j.deleted_at IS NULL
+`
+
+type GetJobPositionOwnerRow struct {
+	EmployerID int32
+	UserID     int32
+}
+
+// El puesto eliminado lógicamente es inexistente a efectos de autorización: quien lo consulta
+// recibe el mismo 404 que ante un identificador que nunca existió, sin poder distinguir si
+// alguna vez hubo un puesto ahí.
+func (q *Queries) GetJobPositionOwner(ctx context.Context, id int32) (GetJobPositionOwnerRow, error) {
+	row := q.db.QueryRowContext(ctx, getJobPositionOwner, id)
+	var i GetJobPositionOwnerRow
+	err := row.Scan(&i.EmployerID, &i.UserID)
 	return i, err
 }
 

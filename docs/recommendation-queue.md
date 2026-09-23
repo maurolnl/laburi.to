@@ -26,7 +26,9 @@ Implementado en LAB-34: los disparadores. Los bordes de escritura de `internal/e
 `cmd/api.go` arma sobre el productor real cuando la cola está habilitada. Ver
 [Disparadores del dominio](#disparadores-del-dominio).
 
-Todavía **no** implementados: los endpoints de consulta (LAB-35).
+Implementado en LAB-35: el borde de consulta. Dos endpoints exponen el estado del batch
+vigente y el conjunto vigente paginado en ambos sentidos. Ver
+[Consulta de recomendaciones](#consulta-de-recomendaciones).
 
 **Mientras el algoritmo de indicadores no exista, todo batch con candidatos termina en
 `failed`.** La única implementación de producción del contrato de scoring es
@@ -382,9 +384,96 @@ Un empleado se empareja contra **todos** los puestos vigentes, y un puesto contr
 empleados, sin cota. Con el volumen actual no es un problema, y acotarlo bien exige los
 filtros duros que la épica prohíbe definir mientras no exista el algoritmo.
 
+## Consulta de recomendaciones
+
+Dos rutas, una por sentido, ambas detrás del JWT:
+
+| Ruta | Actor | Sujeto |
+| --- | --- | --- |
+| `GET /employees/{employeeID}/job-recommendations` | `employee` | el propio empleado |
+| `GET /jobs/{jobPositionID}/employee-recommendations` | `employer` | un puesto propio |
+
+Las dos responden la misma forma de cuerpo:
+
+```json
+{
+  "status": "completed",
+  "items": [],
+  "page": { "limit": 20, "offset": 0, "total": 0 }
+}
+```
+
+### Estado y conjunto salen de batches distintos
+
+`status` es el estado del **batch vigente** —el más reciente del sujeto, cualquiera sea su
+estado—. `items` y `page.total` son el **conjunto vigente** —las recomendaciones del último
+batch `completed`—. Los dos pueden no ser el mismo batch: un empleado con una regeneración en
+curso sigue viendo el conjunto anterior mientras `status` informa `processing`.
+
+| `status` | Significado |
+| --- | --- |
+| `none` | el sujeto nunca tuvo una generación solicitada |
+| `pending` | hay una generación encolada |
+| `processing` | hay una generación en curso |
+| `completed` | el conjunto vigente es el resultado definitivo, tenga items o no |
+| `failed` | la última generación falló; se distingue de un resultado vacío |
+
+`none` no es un estado de batch: `recommendation_batches_status_check` no lo conoce. Existe
+solo en el transporte HTTP, para que un usuario nuevo no se confunda con uno que está
+esperando. **Con `scoring.Unavailable` cableado, el estado habitual de un sujeto con candidatos
+es `failed`**; no es un defecto de la consulta sino la generación bloqueada por la épica.
+
+`items` es siempre un arreglo, nunca `null`: el conjunto vacío es el caso más común.
+
+### Paginación
+
+`limit` y `offset` en query string. `limit` por defecto 20 y máximo 100; `offset` por defecto
+0 y no negativo.
+
+Un valor no numérico, un `limit` fuera de `(0, 100]` o un `offset` negativo responden `400`.
+**No se recorta en silencio**: recortar `limit=1000` a 100 le haría creer al cliente que la
+página que recibió es todo lo que hay.
+
+`page.total` es el tamaño del conjunto vigente ya filtrado, y se resuelve contra el mismo batch
+completado que los items para que ambos no puedan describir conjuntos distintos.
+
+### Orden
+
+El orden lo define la persistencia y el borde no lo toca:
+
+- puestos para un empleado: puntaje descendente, desempate por publicación más reciente;
+- empleados para un puesto: puntaje descendente, desempate por actualización de perfil más
+  reciente;
+- las recomendaciones sin puntaje van al final;
+- los puestos eliminados lógicamente quedan fuera de `items` y de `total`, con independencia de
+  cuándo se generó la recomendación.
+
+### Autorización
+
+La identidad sale del JWT; el identificador del path solo sirve para detectar el acceso ajeno.
+El rol autoriza el sentido: un `employee` solo consulta su propio perfil, un `employer` solo
+puestos de su propio perfil de empleador.
+
+| Situación | Respuesta |
+| --- | --- |
+| sin JWT válido | `401` |
+| identificador o paginación inválidos | `400` |
+| rol incorrecto, sujeto ajeno o empleador sin perfil | `403 {"error":"forbidden"}` |
+| sujeto inexistente o puesto eliminado lógicamente | `404` |
+
+El `403` es genérico a propósito: distinguir «es ajeno» de «no existe» le revelaría a un
+tercero qué identificadores están ocupados. Un puesto eliminado lógicamente responde `404`, el
+mismo código que un identificador que nunca existió.
+
+La resolución de propiedad vive en `internal/recommendation` con consultas propias
+—`GetEmployeeOwner` y `GetJobPositionOwner`— y no importando `internal/employee` ni
+`internal/jobposition`: invertir esa dirección crearía un ciclo.
+
 ## Referencias
 
-- Épica LAB-17 y tickets LAB-31, LAB-32 y LAB-33.
-- Cambios OpenSpec `configure-recommendation-queue`, `publish-recommendation-jobs` y
-  `consume-recommendation-jobs`; capacidades `recommendation-queue-configuration`,
-  `recommendation-job-publishing` y `recommendation-job-consumption`.
+- Épica LAB-17 y tickets LAB-31, LAB-32, LAB-33, LAB-34 y LAB-35.
+- Cambios OpenSpec `configure-recommendation-queue`, `publish-recommendation-jobs`,
+  `consume-recommendation-jobs`, `trigger-recommendation-regeneration` y
+  `expose-recommendation-queries`; capacidades `recommendation-queue-configuration`,
+  `recommendation-job-publishing`, `recommendation-job-consumption`,
+  `recommendation-regeneration-triggers` y `recommendation-query-api`.

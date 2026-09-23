@@ -39,8 +39,10 @@ defecto; sus variables y el arranque local están en `docs/recommendation-queue.
 - `sql/schema/`: migraciones PostgreSQL ordenadas e inmutables una vez aplicadas
   (`0001_employees` … `0005_add_user_roles_and_employers`).
 - Features: `user` (auth + roles), `employee`, `employer`, `jobposition`, `timezone`.
-- Sin HTTP propio: `internal/recommendation` (batches y recomendaciones, productor, worker y
-  el adaptador `Trigger` que los bordes de escritura consumen; todavía sin endpoints).
+- `internal/recommendation`: batches y recomendaciones, productor, worker, el adaptador
+  `Trigger` que los bordes de escritura consumen y el borde HTTP de consulta
+  (`GET /employees/{employeeID}/job-recommendations` y
+  `GET /jobs/{jobPositionID}/employee-recommendations`).
 - Transversales: `internal/auth` (JWT, Argon2id, `UserRole`), `internal/files` (PDFs),
   `internal/uploader` (S3), `internal/scoring` (contrato inyectable de scoring),
   `internal/queue` (configuración y puerto de la cola SQS de recomendaciones),
@@ -64,6 +66,15 @@ defecto; sus variables y el arranque local están en `docs/recommendation-queue.
   confirmado: se registra, el batch del sujeto queda en `failed` y la escritura siguiente
   reintenta. Con la cola apagada se cablea `NoopJobPublisher` para no acumular batches
   fallidos. Detalle en `docs/recommendation-queue.md`.
+- Consulta de recomendaciones: `status` sale del batch **más reciente** e `items` del último
+  batch **completado**; pueden no ser el mismo. Cinco estados expuestos —`none`, `pending`,
+  `processing`, `completed`, `failed`—; `none` vive solo en el transporte HTTP porque el check
+  de la migración 0007 no lo conoce. Paginación por `limit` (defecto 20, máximo 100) y `offset`:
+  un valor fuera de rango es `400`, nunca un recorte silencioso. La autorización sale del JWT y
+  vive en el servicio, no en un middleware, porque el rol determina el sentido de la consulta;
+  el identificador del path solo detecta el acceso ajeno. `internal/recommendation` resuelve la
+  propiedad con consultas propias y **no** debe importar `internal/employee` ni
+  `internal/jobposition`. Detalle en `docs/recommendation-queue.md`.
 - Divergencia conocida entre `internal/queue` e `internal/uploader`: `queue` exige
   `AWS_REGION` y devuelve error, `uploader` cae a `us-east-2` y aborta con `log.Fatal`
   dentro del paquete. En código nuevo seguir el patrón de `queue` —configuración validada
@@ -127,9 +138,10 @@ responden **todos** sus errores en JSON, incluidos los de validación. Migrar lo
 endpoints viejos es un cambio de contrato: coordinar con el frontend en la misma tarea.
 
 Si cambia un contrato, actualizar tipos/mappers del frontend y la documentación de la
-raíz. Los diagramas de `../docs/` contienen diseño futuro: índices, colas y
-recomendaciones aún no existen en este código (empleadores desde la migración 0005;
-puestos de trabajo desde la 0006 y su CRUD en `internal/jobposition`).
+raíz. Los diagramas de `../docs/` todavía contienen diseño futuro —los índices no existen en
+este código—, pero los de consulta de recomendaciones ya describen las rutas reales
+(empleadores desde la migración 0005; puestos de trabajo desde la 0006 y su CRUD en
+`internal/jobposition`; recomendaciones desde la 0007).
 
 ## Persistencia y transacciones
 

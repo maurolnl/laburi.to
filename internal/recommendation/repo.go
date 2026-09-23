@@ -31,6 +31,10 @@ type recommendationQueries interface {
 	GetLastCompletedBatchByJobPosition(ctx context.Context, jobPositionID sql.NullInt32) (database.RecommendationBatch, error)
 	ListJobRecommendationsForEmployee(ctx context.Context, arg database.ListJobRecommendationsForEmployeeParams) ([]database.ListJobRecommendationsForEmployeeRow, error)
 	ListEmployeeRecommendationsForJobPosition(ctx context.Context, arg database.ListEmployeeRecommendationsForJobPositionParams) ([]database.ListEmployeeRecommendationsForJobPositionRow, error)
+	CountJobRecommendationsForEmployee(ctx context.Context, batchID int32) (int64, error)
+	CountEmployeeRecommendationsForJobPosition(ctx context.Context, batchID int32) (int64, error)
+	GetEmployeeOwner(ctx context.Context, id int32) (int32, error)
+	GetJobPositionOwner(ctx context.Context, id int32) (database.GetJobPositionOwnerRow, error)
 }
 
 type RecommendationRepository struct {
@@ -43,6 +47,7 @@ type RecommendationRepository struct {
 var (
 	_ RecommendationStore = (*RecommendationRepository)(nil)
 	_ CandidateSource     = (*RecommendationRepository)(nil)
+	_ SubjectOwnership    = (*RecommendationRepository)(nil)
 )
 
 func NewRepository(db *sql.DB) *RecommendationRepository {
@@ -207,6 +212,15 @@ func (r *RecommendationRepository) JobRecommendationsForEmployee(ctx context.Con
 		return JobRecommendations{}, fmt.Errorf("get last completed batch by employee: %w", err)
 	}
 
+	// El total sale del mismo batch que el tramo y no de una segunda resolución del último
+	// batch completado: si entre ambas consultas un batch nuevo reemplazara al vigente, un
+	// total resuelto por separado describiría un conjunto distinto del que se está paginando.
+	total, err := r.queries.CountJobRecommendationsForEmployee(ctx, completed.ID)
+	if err != nil {
+		return JobRecommendations{}, fmt.Errorf("count job recommendations: %w", err)
+	}
+	result.Total = int32(total)
+
 	rows, err := r.queries.ListJobRecommendationsForEmployee(ctx, database.ListJobRecommendationsForEmployeeParams{
 		BatchID: completed.ID,
 		Limit:   page.Limit,
@@ -271,6 +285,12 @@ func (r *RecommendationRepository) EmployeeRecommendationsForJobPosition(ctx con
 		return EmployeeRecommendations{}, fmt.Errorf("get last completed batch by job position: %w", err)
 	}
 
+	total, err := r.queries.CountEmployeeRecommendationsForJobPosition(ctx, completed.ID)
+	if err != nil {
+		return EmployeeRecommendations{}, fmt.Errorf("count employee recommendations: %w", err)
+	}
+	result.Total = int32(total)
+
 	rows, err := r.queries.ListEmployeeRecommendationsForJobPosition(ctx, database.ListEmployeeRecommendationsForJobPositionParams{
 		BatchID: completed.ID,
 		Limit:   page.Limit,
@@ -310,6 +330,32 @@ func (r *RecommendationRepository) EmployeeRecommendationsForJobPosition(ctx con
 	}
 
 	return result, nil
+}
+
+// EmployeeOwner y JobPositionOwner resuelven la propiedad del sujeto para que el borde de
+// consulta pueda autorizar sin importar los paquetes de dominio de empleado ni de puesto.
+func (r *RecommendationRepository) EmployeeOwner(ctx context.Context, employeeID int32) (int32, error) {
+	userID, err := r.queries.GetEmployeeOwner(ctx, employeeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrSubjectNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("get employee owner: %w", err)
+	}
+
+	return userID, nil
+}
+
+func (r *RecommendationRepository) JobPositionOwner(ctx context.Context, jobPositionID int32) (JobPositionOwner, error) {
+	row, err := r.queries.GetJobPositionOwner(ctx, jobPositionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return JobPositionOwner{}, ErrSubjectNotFound
+	}
+	if err != nil {
+		return JobPositionOwner{}, fmt.Errorf("get job position owner: %w", err)
+	}
+
+	return JobPositionOwner{EmployerID: row.EmployerID, UserID: row.UserID}, nil
 }
 
 func classifyCreateBatchError(err error) error {
