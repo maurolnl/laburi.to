@@ -16,9 +16,20 @@ import "context"
 type Unavailable struct{}
 
 var (
-	_ Scorer     = Unavailable{}
-	_ HardFilter = Unavailable{}
+	_ Scorer       = Unavailable{}
+	_ HardFilter   = Unavailable{}
+	_ Availability = Unavailable{}
 )
+
+// Available declara por adelantado lo que Score y ScoreAll confirmarían al ser invocados.
+// Devuelve el mismo error para que el llamador no tenga que distinguir dos formas de decir
+// que no hay algoritmo.
+//
+// No consulta nada y no evalúa ningún par: es lo que permite al worker resolver el batch sin
+// abrir processing.
+func (Unavailable) Available(context.Context) error {
+	return ErrScoringUnavailable
+}
 
 func (Unavailable) Score(context.Context, Pair) (Result, error) {
 	return Result{}, ErrScoringUnavailable

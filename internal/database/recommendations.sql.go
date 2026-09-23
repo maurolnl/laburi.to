@@ -13,6 +13,41 @@ import (
 	"github.com/lib/pq"
 )
 
+const claimRecommendationBatch = `-- name: ClaimRecommendationBatch :one
+UPDATE recommendation_batches
+SET status = 'processing',
+    updated_at = now()
+WHERE id = $1
+  AND status IN ('pending', 'processing')
+RETURNING id, subject_type, employee_id, job_position_id, status, created_at, updated_at
+`
+
+// Reclamo condicional del trabajo. A diferencia de TransitionRecommendationBatch, que es
+// incondicional y le alcanza al productor porque solo cierra un batch que acaba de abrir,
+// este no toca un batch terminal: un redelivery de un mensaje cuyo batch ya está
+// 'completed' lo devolvería a 'processing' y el reemplazo siguiente destruiría el conjunto
+// vigente que ese batch dejó.
+//
+// El predicado incluye 'processing' y no solo 'pending' a propósito. Excluirlo haría el
+// reclamo estrictamente exclusivo, pero convertiría cualquier caída del worker a mitad de
+// un batch en un sujeto bloqueado para siempre por el índice único parcial: el redelivery
+// no podría reclamarlo. Que dos entregas se solapen es inocuo, porque completar un batch es
+// un reemplazo atómico completo y el último en commitear gana.
+func (q *Queries) ClaimRecommendationBatch(ctx context.Context, id int32) (RecommendationBatch, error) {
+	row := q.db.QueryRowContext(ctx, claimRecommendationBatch, id)
+	var i RecommendationBatch
+	err := row.Scan(
+		&i.ID,
+		&i.SubjectType,
+		&i.EmployeeID,
+		&i.JobPositionID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createRecommendationBatch = `-- name: CreateRecommendationBatch :one
 INSERT INTO recommendation_batches (
     subject_type,
@@ -78,6 +113,54 @@ func (q *Queries) DeleteOtherBatchesForJobPosition(ctx context.Context, arg Dele
 	return err
 }
 
+const employeeExists = `-- name: EmployeeExists :one
+SELECT EXISTS (SELECT 1 FROM employees WHERE id = $1)
+`
+
+// El worker distingue un empleado inexistente de uno sin datos de perfil: el primero cierra
+// el batch sin recomendaciones, el segundo es un candidato válido.
+func (q *Queries) EmployeeExists(ctx context.Context, id int32) (bool, error) {
+	row := q.db.QueryRowContext(ctx, employeeExists, id)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const getActiveJobPositionRequirements = `-- name: GetActiveJobPositionRequirements :one
+SELECT id AS job_position_id,
+       required_experience,
+       required_education_level,
+       available_hours_per_day,
+       timezone,
+       technical_resources
+FROM job_positions
+WHERE id = $1
+  AND deleted_at IS NULL
+`
+
+type GetActiveJobPositionRequirementsRow struct {
+	JobPositionID          int32
+	RequiredExperience     string
+	RequiredEducationLevel string
+	AvailableHoursPerDay   int16
+	Timezone               string
+	TechnicalResources     []string
+}
+
+func (q *Queries) GetActiveJobPositionRequirements(ctx context.Context, id int32) (GetActiveJobPositionRequirementsRow, error) {
+	row := q.db.QueryRowContext(ctx, getActiveJobPositionRequirements, id)
+	var i GetActiveJobPositionRequirementsRow
+	err := row.Scan(
+		&i.JobPositionID,
+		&i.RequiredExperience,
+		&i.RequiredEducationLevel,
+		&i.AvailableHoursPerDay,
+		&i.Timezone,
+		pq.Array(&i.TechnicalResources),
+	)
+	return i, err
+}
+
 const getCurrentBatchByEmployee = `-- name: GetCurrentBatchByEmployee :one
 SELECT id, subject_type, employee_id, job_position_id, status, created_at, updated_at
 FROM recommendation_batches
@@ -122,6 +205,60 @@ func (q *Queries) GetCurrentBatchByJobPosition(ctx context.Context, jobPositionI
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getEmployeeScoringProfile = `-- name: GetEmployeeScoringProfile :one
+
+SELECT e.id AS employee_id,
+       e.years_of_experience,
+       a.available_hours_per_day,
+       l.timezone,
+       t.paid_software,
+       (t.employee_id IS NOT NULL)::boolean AS has_tech_profile,
+       ARRAY(
+           SELECT ed.education_type
+           FROM employee_education ed
+           WHERE ed.employee_id = e.id
+       )::text[] AS education_types
+FROM employees e
+LEFT JOIN employee_profile_availability a ON a.employee_id = e.id
+LEFT JOIN employee_location l ON l.employee_id = e.id
+LEFT JOIN employee_profile_tech t ON t.employee_id = e.id
+WHERE e.id = $1
+`
+
+type GetEmployeeScoringProfileRow struct {
+	EmployeeID           int32
+	YearsOfExperience    string
+	AvailableHoursPerDay sql.NullInt16
+	Timezone             sql.NullString
+	PaidSoftware         []string
+	HasTechProfile       bool
+	EducationTypes       []string
+}
+
+// Universo de candidatos. Todas estas consultas alimentan al worker: traducen las filas a
+// la entrada normalizada del contrato de scoring. Los puestos eliminados lógicamente quedan
+// fuera de todas, porque un puesto eliminado nunca se recomienda ni recibe candidatos.
+// Los LEFT JOIN son deliberados: el perfil del empleado se completa en cinco pasos, y un
+// paso sin completar debe producir NULL y no la desaparición de la fila. La ausencia de un
+// dato y su valor cero son estados distintos que el contrato de scoring distingue.
+//
+// highest_education se resuelve en Go y no acá: el orden de los niveles ya es parte del
+// contrato de scoring, y una segunda copia en un CASE se desincronizaría.
+func (q *Queries) GetEmployeeScoringProfile(ctx context.Context, id int32) (GetEmployeeScoringProfileRow, error) {
+	row := q.db.QueryRowContext(ctx, getEmployeeScoringProfile, id)
+	var i GetEmployeeScoringProfileRow
+	err := row.Scan(
+		&i.EmployeeID,
+		&i.YearsOfExperience,
+		&i.AvailableHoursPerDay,
+		&i.Timezone,
+		pq.Array(&i.PaidSoftware),
+		&i.HasTechProfile,
+		pq.Array(&i.EducationTypes),
 	)
 	return i, err
 }
@@ -176,6 +313,30 @@ func (q *Queries) GetLastCompletedBatchByJobPosition(ctx context.Context, jobPos
 	return i, err
 }
 
+const getRecommendationBatch = `-- name: GetRecommendationBatch :one
+SELECT id, subject_type, employee_id, job_position_id, status, created_at, updated_at
+FROM recommendation_batches
+WHERE id = $1
+`
+
+// El worker necesita distinguir un batch inexistente de uno ya terminal: el primero
+// significa que el sujeto o el batch desaparecieron, y el segundo que otro procesamiento
+// ya lo cerró. Ambos se reconocen sin trabajo, pero el diagnóstico es distinto.
+func (q *Queries) GetRecommendationBatch(ctx context.Context, id int32) (RecommendationBatch, error) {
+	row := q.db.QueryRowContext(ctx, getRecommendationBatch, id)
+	var i RecommendationBatch
+	err := row.Scan(
+		&i.ID,
+		&i.SubjectType,
+		&i.EmployeeID,
+		&i.JobPositionID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const insertRecommendation = `-- name: InsertRecommendation :one
 INSERT INTO recommendations (
     batch_id,
@@ -211,6 +372,57 @@ func (q *Queries) InsertRecommendation(ctx context.Context, arg InsertRecommenda
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const listActiveJobPositionRequirements = `-- name: ListActiveJobPositionRequirements :many
+SELECT id AS job_position_id,
+       required_experience,
+       required_education_level,
+       available_hours_per_day,
+       timezone,
+       technical_resources
+FROM job_positions
+WHERE deleted_at IS NULL
+ORDER BY id
+`
+
+type ListActiveJobPositionRequirementsRow struct {
+	JobPositionID          int32
+	RequiredExperience     string
+	RequiredEducationLevel string
+	AvailableHoursPerDay   int16
+	Timezone               string
+	TechnicalResources     []string
+}
+
+func (q *Queries) ListActiveJobPositionRequirements(ctx context.Context) ([]ListActiveJobPositionRequirementsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listActiveJobPositionRequirements)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveJobPositionRequirementsRow
+	for rows.Next() {
+		var i ListActiveJobPositionRequirementsRow
+		if err := rows.Scan(
+			&i.JobPositionID,
+			&i.RequiredExperience,
+			&i.RequiredEducationLevel,
+			&i.AvailableHoursPerDay,
+			&i.Timezone,
+			pq.Array(&i.TechnicalResources),
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listEmployeeRecommendationsForJobPosition = `-- name: ListEmployeeRecommendationsForJobPosition :many
@@ -276,6 +488,66 @@ func (q *Queries) ListEmployeeRecommendationsForJobPosition(ctx context.Context,
 			&i.PortfolioUrl,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEmployeeScoringProfiles = `-- name: ListEmployeeScoringProfiles :many
+SELECT e.id AS employee_id,
+       e.years_of_experience,
+       a.available_hours_per_day,
+       l.timezone,
+       t.paid_software,
+       (t.employee_id IS NOT NULL)::boolean AS has_tech_profile,
+       ARRAY(
+           SELECT ed.education_type
+           FROM employee_education ed
+           WHERE ed.employee_id = e.id
+       )::text[] AS education_types
+FROM employees e
+LEFT JOIN employee_profile_availability a ON a.employee_id = e.id
+LEFT JOIN employee_location l ON l.employee_id = e.id
+LEFT JOIN employee_profile_tech t ON t.employee_id = e.id
+ORDER BY e.id
+`
+
+type ListEmployeeScoringProfilesRow struct {
+	EmployeeID           int32
+	YearsOfExperience    string
+	AvailableHoursPerDay sql.NullInt16
+	Timezone             sql.NullString
+	PaidSoftware         []string
+	HasTechProfile       bool
+	EducationTypes       []string
+}
+
+func (q *Queries) ListEmployeeScoringProfiles(ctx context.Context) ([]ListEmployeeScoringProfilesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listEmployeeScoringProfiles)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListEmployeeScoringProfilesRow
+	for rows.Next() {
+		var i ListEmployeeScoringProfilesRow
+		if err := rows.Scan(
+			&i.EmployeeID,
+			&i.YearsOfExperience,
+			&i.AvailableHoursPerDay,
+			&i.Timezone,
+			pq.Array(&i.PaidSoftware),
+			&i.HasTechProfile,
+			pq.Array(&i.EducationTypes),
 		); err != nil {
 			return nil, err
 		}

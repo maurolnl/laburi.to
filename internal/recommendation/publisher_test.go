@@ -89,6 +89,16 @@ func (s *fakeStore) TransitionBatch(_ context.Context, batchID int32, status Bat
 	return batch, nil
 }
 
+func (s *fakeStore) GetBatch(context.Context, int32) (Batch, error) {
+	s.t.Error("el productor no debe leer batches: abre el suyo y no consulta ninguno más")
+	return Batch{}, nil
+}
+
+func (s *fakeStore) ClaimBatch(context.Context, int32) (Batch, error) {
+	s.t.Error("el productor no debe reclamar batches: reclamar trabajo es del consumidor")
+	return Batch{}, nil
+}
+
 func (s *fakeStore) CompleteBatch(context.Context, int32, []Candidate) (Batch, error) {
 	s.t.Error("el productor no debe completar batches: emitir no calcula recomendaciones")
 	return Batch{}, nil
@@ -137,6 +147,16 @@ func (s *unusableStore) CreateBatch(context.Context, Subject) (Batch, error) {
 
 func (s *unusableStore) TransitionBatch(context.Context, int32, BatchStatus) (Batch, error) {
 	s.t.Error("no se esperaba transicionar ningún batch")
+	return Batch{}, nil
+}
+
+func (s *unusableStore) GetBatch(context.Context, int32) (Batch, error) {
+	s.t.Error("no se esperaba leer ningún batch")
+	return Batch{}, nil
+}
+
+func (s *unusableStore) ClaimBatch(context.Context, int32) (Batch, error) {
+	s.t.Error("no se esperaba reclamar ningún batch")
 	return Batch{}, nil
 }
 

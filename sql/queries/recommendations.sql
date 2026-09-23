@@ -14,6 +14,33 @@ SET status = $2,
 WHERE id = $1
 RETURNING id, subject_type, employee_id, job_position_id, status, created_at, updated_at;
 
+-- El worker necesita distinguir un batch inexistente de uno ya terminal: el primero
+-- significa que el sujeto o el batch desaparecieron, y el segundo que otro procesamiento
+-- ya lo cerró. Ambos se reconocen sin trabajo, pero el diagnóstico es distinto.
+-- name: GetRecommendationBatch :one
+SELECT id, subject_type, employee_id, job_position_id, status, created_at, updated_at
+FROM recommendation_batches
+WHERE id = $1;
+
+-- Reclamo condicional del trabajo. A diferencia de TransitionRecommendationBatch, que es
+-- incondicional y le alcanza al productor porque solo cierra un batch que acaba de abrir,
+-- este no toca un batch terminal: un redelivery de un mensaje cuyo batch ya está
+-- 'completed' lo devolvería a 'processing' y el reemplazo siguiente destruiría el conjunto
+-- vigente que ese batch dejó.
+--
+-- El predicado incluye 'processing' y no solo 'pending' a propósito. Excluirlo haría el
+-- reclamo estrictamente exclusivo, pero convertiría cualquier caída del worker a mitad de
+-- un batch en un sujeto bloqueado para siempre por el índice único parcial: el redelivery
+-- no podría reclamarlo. Que dos entregas se solapen es inocuo, porque completar un batch es
+-- un reemplazo atómico completo y el último en commitear gana.
+-- name: ClaimRecommendationBatch :one
+UPDATE recommendation_batches
+SET status = 'processing',
+    updated_at = now()
+WHERE id = $1
+  AND status IN ('pending', 'processing')
+RETURNING id, subject_type, employee_id, job_position_id, status, created_at, updated_at;
+
 -- El batch vigente es el más reciente cualquiera sea su estado: es el que determina si
 -- el sujeto se muestra procesando, completado, vacío o con error.
 -- name: GetCurrentBatchByEmployee :one
@@ -110,3 +137,76 @@ WHERE r.batch_id = $1
   AND j.deleted_at IS NULL
 ORDER BY r.score DESC NULLS LAST, e.updated_at DESC, r.id ASC
 LIMIT $2 OFFSET $3;
+
+-- Universo de candidatos. Todas estas consultas alimentan al worker: traducen las filas a
+-- la entrada normalizada del contrato de scoring. Los puestos eliminados lógicamente quedan
+-- fuera de todas, porque un puesto eliminado nunca se recomienda ni recibe candidatos.
+
+-- Los LEFT JOIN son deliberados: el perfil del empleado se completa en cinco pasos, y un
+-- paso sin completar debe producir NULL y no la desaparición de la fila. La ausencia de un
+-- dato y su valor cero son estados distintos que el contrato de scoring distingue.
+--
+-- highest_education se resuelve en Go y no acá: el orden de los niveles ya es parte del
+-- contrato de scoring, y una segunda copia en un CASE se desincronizaría.
+-- name: GetEmployeeScoringProfile :one
+SELECT e.id AS employee_id,
+       e.years_of_experience,
+       a.available_hours_per_day,
+       l.timezone,
+       t.paid_software,
+       (t.employee_id IS NOT NULL)::boolean AS has_tech_profile,
+       ARRAY(
+           SELECT ed.education_type
+           FROM employee_education ed
+           WHERE ed.employee_id = e.id
+       )::text[] AS education_types
+FROM employees e
+LEFT JOIN employee_profile_availability a ON a.employee_id = e.id
+LEFT JOIN employee_location l ON l.employee_id = e.id
+LEFT JOIN employee_profile_tech t ON t.employee_id = e.id
+WHERE e.id = $1;
+
+-- name: ListEmployeeScoringProfiles :many
+SELECT e.id AS employee_id,
+       e.years_of_experience,
+       a.available_hours_per_day,
+       l.timezone,
+       t.paid_software,
+       (t.employee_id IS NOT NULL)::boolean AS has_tech_profile,
+       ARRAY(
+           SELECT ed.education_type
+           FROM employee_education ed
+           WHERE ed.employee_id = e.id
+       )::text[] AS education_types
+FROM employees e
+LEFT JOIN employee_profile_availability a ON a.employee_id = e.id
+LEFT JOIN employee_location l ON l.employee_id = e.id
+LEFT JOIN employee_profile_tech t ON t.employee_id = e.id
+ORDER BY e.id;
+
+-- name: GetActiveJobPositionRequirements :one
+SELECT id AS job_position_id,
+       required_experience,
+       required_education_level,
+       available_hours_per_day,
+       timezone,
+       technical_resources
+FROM job_positions
+WHERE id = $1
+  AND deleted_at IS NULL;
+
+-- name: ListActiveJobPositionRequirements :many
+SELECT id AS job_position_id,
+       required_experience,
+       required_education_level,
+       available_hours_per_day,
+       timezone,
+       technical_resources
+FROM job_positions
+WHERE deleted_at IS NULL
+ORDER BY id;
+
+-- El worker distingue un empleado inexistente de uno sin datos de perfil: el primero cierra
+-- el batch sin recomendaciones, el segundo es un candidato válido.
+-- name: EmployeeExists :one
+SELECT EXISTS (SELECT 1 FROM employees WHERE id = $1);

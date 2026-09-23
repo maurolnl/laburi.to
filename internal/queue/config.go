@@ -19,6 +19,12 @@ const (
 	EnvMaxMessages       = "AWS_SQS_MAX_MESSAGES"
 	EnvMaxRetryAttempts  = "AWS_SQS_MAX_RETRY_ATTEMPTS"
 	EnvEndpointURL       = "AWS_SQS_ENDPOINT_URL"
+
+	// EnvWorkerEnabled decide si esta instancia consume la cola. Es un flag propio y no
+	// reutiliza EnvEnabled porque publicar y consumir son decisiones de despliegue
+	// distintas: una instancia de API puede querer emitir solicitudes sin dedicar su
+	// proceso a procesarlas.
+	EnvWorkerEnabled = "RECOMMENDATIONS_WORKER_ENABLED"
 )
 
 // Valores por defecto de los parámetros opcionales.
@@ -76,6 +82,33 @@ type Config struct {
 	// EndpointURL apunta el cliente a un SQS local (LocalStack, ElasticMQ). Vacío significa
 	// resolver el endpoint real de AWS por región.
 	EndpointURL string
+}
+
+// WorkerConfig decide si este proceso consume la cola.
+//
+// Es un tipo aparte y no un campo de Config porque se resuelve aparte: Config describe el
+// transporte, y con el transporte apagado LoadConfig no lee ninguna otra variable. Consumir
+// no es transporte, es qué hace esta instancia con él, y su flag tiene que poder leerse en
+// las cuatro combinaciones para que quien monta el worker pueda explicar por qué no arranca
+// en vez de que el flag desaparezca en silencio.
+type WorkerConfig struct {
+	Enabled bool
+}
+
+// LoadWorkerConfig resuelve el flag del consumidor. Un valor que no se entienda es un error y
+// no un silencioso false, por la misma razón que en el flag del transporte: un typo no debe
+// apagar el worker sin avisar.
+//
+// Habilitado no alcanza para arrancar: sin transporte no hay de dónde consumir. Esa
+// comprobación pertenece a quien monta el worker, que es el único que ve las dos
+// configuraciones.
+func LoadWorkerConfig(lookup Lookup) (WorkerConfig, error) {
+	enabled, err := lookupBool(lookup, EnvWorkerEnabled)
+	if err != nil {
+		return WorkerConfig{}, err
+	}
+
+	return WorkerConfig{Enabled: enabled}, nil
 }
 
 // LoadConfig resuelve y valida la configuración del transporte.
@@ -190,4 +223,23 @@ func lookupBoundedInt(lookup Lookup, key string, fallback, lower, upper int) (in
 	}
 
 	return value, nil
+}
+
+// ShouldConsume informa si esta instancia debe iniciar el ciclo de consumo, y con qué motivo
+// cuando no.
+//
+// Existe como función y no como una condición suelta en cmd porque la decisión combina las
+// dos configuraciones y tiene tres desenlaces, no dos: apagado a propósito, encendido sin
+// transporte —que es un despliegue mal armado y debe ser visible— y encendido.
+//
+// El motivo es para una línea de log: no nombra ninguna URL, región ni credencial.
+func (w WorkerConfig) ShouldConsume(transport Config) (bool, string) {
+	switch {
+	case !w.Enabled:
+		return false, "recommendation worker disabled"
+	case !transport.Enabled:
+		return false, "recommendation worker enabled but the recommendation queue is disabled: nothing to consume"
+	default:
+		return true, "recommendation worker enabled"
+	}
 }

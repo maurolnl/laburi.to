@@ -128,9 +128,14 @@ func newTestEmployer(t *testing.T, db execer) int32 {
 }
 
 type testJobPositionData struct {
-	position  string
-	createdAt *time.Time
-	deleted   bool
+	position               string
+	createdAt              *time.Time
+	deleted                bool
+	requiredExperience     string
+	requiredEducationLevel string
+	availableHoursPerDay   int16
+	timezone               string
+	technicalResources     []string
 }
 
 type testJobPositionOption func(*testJobPositionData)
@@ -152,7 +157,14 @@ func withTestJobPositionDeleted() testJobPositionOption {
 func newTestJobPosition(t *testing.T, db execer, employerID int32, opts ...testJobPositionOption) int32 {
 	t.Helper()
 
-	data := testJobPositionData{position: "Backend Developer"}
+	data := testJobPositionData{
+		position:               "Backend Developer",
+		requiredExperience:     "2_to_5y",
+		requiredEducationLevel: "university",
+		availableHoursPerDay:   8,
+		timezone:               "America/Argentina/Buenos_Aires",
+		technicalResources:     []string{},
+	}
 	for _, opt := range opts {
 		opt(&data)
 	}
@@ -175,8 +187,8 @@ func newTestJobPosition(t *testing.T, db execer, employerID int32, opts ...testJ
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), $10)
 		RETURNING id
-	`, employerID, data.position, "Individual Contributor", "2_to_5y", "university",
-		int16(8), "America/Argentina/Buenos_Aires", pq.Array([]string{}), createdAt, deletedAt).Scan(&id)
+	`, employerID, data.position, "Individual Contributor", data.requiredExperience, data.requiredEducationLevel,
+		data.availableHoursPerDay, data.timezone, pq.Array(data.technicalResources), createdAt, deletedAt).Scan(&id)
 	if err != nil {
 		t.Fatalf("factory: crear puesto: %v", err)
 	}
@@ -241,4 +253,77 @@ func scorePtr(value float64) *float64 { return &value }
 type execer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// Factories de los pasos opcionales del perfil del empleado. Existen sueltas y no como
+// opciones de newTestEmployee porque el punto de los tests del universo de candidatos es
+// justamente el empleado al que le faltan pasos: cada test agrega solo los que necesita.
+
+func withTestEmployeeExperience(level string) testEmployeeOption {
+	return func(data *testEmployeeData) { data.yearsOfExperience = level }
+}
+
+func newTestEmployeeAvailability(t *testing.T, db execer, employeeID int32, hours int16) {
+	t.Helper()
+
+	_, err := db.ExecContext(context.Background(), `
+		INSERT INTO employee_profile_availability (employee_id, available_hours_per_day)
+		VALUES ($1, $2)
+	`, employeeID, hours)
+	if err != nil {
+		t.Fatalf("factory: crear disponibilidad: %v", err)
+	}
+}
+
+func newTestEmployeeLocation(t *testing.T, db execer, employeeID int32, timezone string) {
+	t.Helper()
+
+	_, err := db.ExecContext(context.Background(), `
+		INSERT INTO employee_location (employee_id, timezone) VALUES ($1, $2)
+	`, employeeID, timezone)
+	if err != nil {
+		t.Fatalf("factory: crear locación: %v", err)
+	}
+}
+
+// newTestEmployeeTech admite paidSoftware nil para cubrir la fila de recursos existente pero
+// sin software declarado, que es distinta de no tener fila.
+func newTestEmployeeTech(t *testing.T, db execer, employeeID int32, paidSoftware []string) {
+	t.Helper()
+
+	var software any
+	if paidSoftware != nil {
+		software = pq.Array(paidSoftware)
+	}
+
+	_, err := db.ExecContext(context.Background(), `
+		INSERT INTO employee_profile_tech (employee_id, os, paid_software) VALUES ($1, $2, $3)
+	`, employeeID, "linux", software)
+	if err != nil {
+		t.Fatalf("factory: crear recursos técnicos: %v", err)
+	}
+}
+
+func newTestEmployeeEducation(t *testing.T, db execer, employeeID int32, educationType string) {
+	t.Helper()
+
+	_, err := db.ExecContext(context.Background(), `
+		INSERT INTO employee_education (employee_id, education_type, title, status)
+		VALUES ($1, $2, $3, 'completed')
+	`, employeeID, educationType, "Título")
+	if err != nil {
+		t.Fatalf("factory: crear educación: %v", err)
+	}
+}
+
+// withTestJobPositionRequirements fija los atributos comparables del puesto, que son los que
+// viajan a la entrada normalizada del scoring.
+func withTestJobPositionRequirements(experience, education string, hours int16, timezone string, resources []string) testJobPositionOption {
+	return func(data *testJobPositionData) {
+		data.requiredExperience = experience
+		data.requiredEducationLevel = education
+		data.availableHoursPerDay = hours
+		data.timezone = timezone
+		data.technicalResources = resources
+	}
 }

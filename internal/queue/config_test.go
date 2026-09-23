@@ -335,3 +335,114 @@ func TestLoadConfigKeepsRequiredValues(t *testing.T) {
 		t.Errorf("DLQURL = %q, want the declared dead letter queue URL", cfg.DLQURL)
 	}
 }
+
+// El flag del worker es independiente del del transporte: una instancia puede querer emitir
+// sin consumir, y la configuración tiene que poder expresar las cuatro combinaciones.
+func TestLoadWorkerConfigIsIndependentOfTheTransport(t *testing.T) {
+	tests := []struct {
+		name         string
+		transport    string
+		worker       string
+		wantEnabled  bool
+		wantWorkerOn bool
+	}{
+		{name: "both off", transport: "false", worker: "false"},
+		{name: "transport on, worker off", transport: "true", worker: "false", wantEnabled: true},
+		{name: "transport on, worker on", transport: "true", worker: "true", wantEnabled: true, wantWorkerOn: true},
+		// Consumir sin transporte es una combinación declarable y sin efecto: quien monta el
+		// worker comprueba las dos cosas y explica por qué no arranca.
+		{name: "transport off, worker on", transport: "false", worker: "true", wantWorkerOn: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			env := enabledEnv()
+			env[EnvEnabled] = test.transport
+			env[EnvWorkerEnabled] = test.worker
+
+			cfg, err := LoadConfig(envLookup(env))
+			if err != nil {
+				t.Fatalf("LoadConfig() error = %v", err)
+			}
+			workerCfg, err := LoadWorkerConfig(envLookup(env))
+			if err != nil {
+				t.Fatalf("LoadWorkerConfig() error = %v", err)
+			}
+
+			if cfg.Enabled != test.wantEnabled {
+				t.Fatalf("Enabled = %v, want %v", cfg.Enabled, test.wantEnabled)
+			}
+			if workerCfg.Enabled != test.wantWorkerOn {
+				t.Fatalf("WorkerConfig.Enabled = %v, want %v", workerCfg.Enabled, test.wantWorkerOn)
+			}
+		})
+	}
+}
+
+func TestLoadWorkerConfigDefaultsToOff(t *testing.T) {
+	cfg, err := LoadWorkerConfig(envLookup(enabledEnv()))
+	if err != nil {
+		t.Fatalf("LoadWorkerConfig() error = %v", err)
+	}
+	if cfg.Enabled {
+		t.Fatal("the worker must stay off unless it is explicitly enabled")
+	}
+}
+
+// Un typo en el flag no debe apagar el worker sin avisar, igual que en el del transporte.
+func TestLoadWorkerConfigRejectsAnUnreadableFlag(t *testing.T) {
+	env := enabledEnv()
+	env[EnvWorkerEnabled] = "yes please"
+
+	_, err := LoadWorkerConfig(envLookup(env))
+	if !errors.Is(err, ErrInvalidQueueConfig) {
+		t.Fatalf("LoadConfig() error = %v, want ErrInvalidQueueConfig", err)
+	}
+	if !strings.Contains(err.Error(), EnvWorkerEnabled) {
+		t.Fatalf("the error must name the offending variable, got %q", err)
+	}
+	if strings.Contains(err.Error(), "yes please") {
+		t.Fatalf("the error must never include the value, got %q", err)
+	}
+}
+
+// Las tres decisiones de arranque del consumidor, sin necesidad de montar la aplicación.
+func TestShouldConsumeCoversEveryFlagCombination(t *testing.T) {
+	tests := []struct {
+		name      string
+		transport bool
+		worker    bool
+		want      bool
+	}{
+		{name: "both off", transport: false, worker: false, want: false},
+		{name: "transport on, worker off", transport: true, worker: false, want: false},
+		{name: "transport off, worker on", transport: false, worker: true, want: false},
+		{name: "both on", transport: true, worker: true, want: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			should, reason := WorkerConfig{Enabled: test.worker}.ShouldConsume(Config{Enabled: test.transport})
+			if should != test.want {
+				t.Fatalf("ShouldConsume() = %v, want %v", should, test.want)
+			}
+			if reason == "" {
+				t.Fatal("every decision must carry a reason for the startup log")
+			}
+		})
+	}
+}
+
+// Encendido sin transporte no es lo mismo que apagado: el primero es un despliegue mal
+// armado y su motivo tiene que decirlo.
+func TestShouldConsumeDistinguishesADisabledWorkerFromAMissingTransport(t *testing.T) {
+	_, off := WorkerConfig{Enabled: false}.ShouldConsume(Config{Enabled: true})
+	_, orphan := WorkerConfig{Enabled: true}.ShouldConsume(Config{Enabled: false})
+
+	if off == orphan {
+		t.Fatalf("both reasons read the same: %q", off)
+	}
+	if !strings.Contains(orphan, "queue is disabled") {
+		t.Fatalf("the reason must name the missing transport, got %q", orphan)
+	}
+}
