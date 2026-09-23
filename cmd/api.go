@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/maurolnl/bolsa-de-trabajo-back/cmd/middleware"
@@ -157,13 +159,41 @@ func (app *application) mountDB() *sql.DB {
 	return db
 }
 
-func (app *application) run(h http.Handler) error {
+// shutdownGrace es lo que se le da a las peticiones en curso para terminar antes de cerrar.
+// Acotado a propósito: un plazo largo retrasa cada deploy sin beneficio, porque los handlers
+// de esta API son cortos.
+const shutdownGrace = 10 * time.Second
+
+// run atiende hasta que el contexto se cancela y recién entonces cierra el servidor.
+//
+// El apagado explícito es obligatorio y no un lujo: atender la señal con signal.NotifyContext
+// desactiva la terminación por defecto del proceso, y ListenAndServe no mira el contexto. Sin
+// este cierre, un SIGTERM cancelaría el worker y dejaría el proceso sirviendo para siempre,
+// hasta que el orquestador lo matara al vencer su propio plazo.
+func (app *application) run(ctx context.Context, h http.Handler) error {
 	server := &http.Server{
 		Addr:    app.config.addr,
 		Handler: h,
 	}
 
+	closed := make(chan error, 1)
+	go func() {
+		<-ctx.Done()
+
+		// El plazo de gracia se desprende de la cancelación que lo disparó: usar el contexto
+		// ya cancelado abortaría el cierre de inmediato, que es lo contrario de ordenado.
+		grace, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownGrace)
+		defer cancel()
+
+		log.Printf("Shutting down, draining requests for up to %s \n", shutdownGrace)
+		closed <- server.Shutdown(grace)
+	}()
+
 	log.Printf("Server listening on %s \n", app.config.addr)
 
-	return server.ListenAndServe()
+	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+
+	return <-closed
 }

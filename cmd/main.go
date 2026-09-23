@@ -61,7 +61,7 @@ func main() {
 
 	h := api.mount()
 	api.startWorker(ctx)
-	if err := api.run(h); err != nil {
+	if err := api.run(ctx, h); err != nil {
 		logErrorAndFail(err)
 	}
 }
