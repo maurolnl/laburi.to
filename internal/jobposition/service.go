@@ -79,7 +79,7 @@ func (s *jobPositionService) CreateJobPosition(ctx context.Context, employerID i
 	}
 
 	position.Normalize()
-	publish(ctx, s.publisher, position)
+	publish(ctx, s.publisher, position.ID)
 
 	return position, nil
 }
@@ -125,7 +125,7 @@ func (s *jobPositionService) UpdateJobPosition(ctx context.Context, jobPositionI
 	}
 
 	position.Normalize()
-	publish(ctx, s.publisher, position)
+	publish(ctx, s.publisher, position.ID)
 
 	return position, nil
 }

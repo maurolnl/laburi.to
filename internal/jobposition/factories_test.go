@@ -373,13 +373,16 @@ func ownedStore(options ...testJobPositionOption) *fakeJobPositionStore {
 
 // fakePublisher es el doble del puerto de recomendaciones. Toda la suite lo usa en lugar de
 // SQS: ninguna prueba del paquete abre red, lee entorno ni necesita credenciales.
+//
+// Registra identificadores y no puestos porque eso es todo lo que el puerto transporta: si
+// alguna vez volviera a recibir la representación completa, este doble dejaría de compilar.
 type fakePublisher struct {
 	err       error
-	published []JobPosition
+	published []int32
 }
 
-func (f *fakePublisher) JobPositionPublished(_ context.Context, position JobPosition) error {
-	f.published = append(f.published, position)
+func (f *fakePublisher) JobPositionPublished(_ context.Context, jobPositionID int32) error {
+	f.published = append(f.published, jobPositionID)
 	return f.err
 }
 

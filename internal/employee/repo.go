@@ -154,6 +154,14 @@ func (r *EmployeeRepository) GetEmployee(ctx context.Context, ID int32) (Employe
 	}, nil
 }
 
+// IsProfileComplete delega en la consulta que combina la existencia de las cinco filas. Se
+// resuelve en una sola ida a la base y no reutiliza GetEmployee, que toma el userID, agrega
+// tres subconsultas JSON y devuelve el perfil entero para responder una pregunta booleana.
+func (r *EmployeeRepository) IsProfileComplete(ctx context.Context, employeeID int32) (bool, error) {
+	q := database.New(r.db)
+	return q.IsEmployeeProfileComplete(ctx, employeeID)
+}
+
 func (r *EmployeeRepository) GetEmployeeByID(ctx context.Context, ID int32) (Employee, error) {
 	q := database.New(r.db)
 	row, err := q.GetEmployeeByID(ctx, ID)

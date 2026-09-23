@@ -169,8 +169,8 @@ func TestJobPositionServiceNotifiesPublisherOnlyOnSuccess(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateJobPosition() error = %v", err)
 		}
-		if len(publisher.published) != 1 || !reflect.DeepEqual(publisher.published[0], newTestJobPosition()) {
-			t.Fatalf("published = %#v, want exactly the created job position", publisher.published)
+		if len(publisher.published) != 1 || publisher.published[0] != newTestJobPosition().ID {
+			t.Fatalf("published = %#v, want exactly the created job position id", publisher.published)
 		}
 	})
 
@@ -180,8 +180,8 @@ func TestJobPositionServiceNotifiesPublisherOnlyOnSuccess(t *testing.T) {
 		if err != nil {
 			t.Fatalf("UpdateJobPosition() error = %v", err)
 		}
-		if len(publisher.published) != 1 {
-			t.Fatalf("published = %#v, want exactly one notification", publisher.published)
+		if len(publisher.published) != 1 || publisher.published[0] != newTestJobPosition().ID {
+			t.Fatalf("published = %#v, want exactly the updated job position id", publisher.published)
 		}
 	})
 
@@ -260,7 +260,7 @@ func TestJobPositionServiceSurvivesPublisherFailure(t *testing.T) {
 }
 
 func TestNoopEventPublisherSucceeds(t *testing.T) {
-	if err := (NoopEventPublisher{}).JobPositionPublished(context.Background(), newTestJobPosition()); err != nil {
+	if err := (NoopEventPublisher{}).JobPositionPublished(context.Background(), testJobPositionID); err != nil {
 		t.Fatalf("JobPositionPublished() error = %v, want nil", err)
 	}
 }
@@ -300,12 +300,11 @@ func TestJobPositionEventPublisherPortIsAlwaysADouble(t *testing.T) {
 	var _ JobPositionEventPublisher = NoopEventPublisher{}
 
 	publisher := &fakePublisher{}
-	position := newTestJobPosition()
-	if err := publisher.JobPositionPublished(context.Background(), position); err != nil {
+	if err := publisher.JobPositionPublished(context.Background(), testJobPositionID); err != nil {
 		t.Fatalf("fake publisher error = %v", err)
 	}
-	if len(publisher.published) != 1 || !reflect.DeepEqual(publisher.published[0], position) {
-		t.Fatalf("published = %#v, want the notified position", publisher.published)
+	if len(publisher.published) != 1 || publisher.published[0] != testJobPositionID {
+		t.Fatalf("published = %#v, want the notified job position id", publisher.published)
 	}
 
 	// Un servicio sin publicador no debe romperse: el puerto es opcional mientras la épica

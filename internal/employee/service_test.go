@@ -24,9 +24,18 @@ func newFakeFile(content string) *fakeFile {
 
 func newTestService(t *testing.T) (*employeeService, *fakeEmployeeStore, *fakeUploader) {
 	t.Helper()
+	service, store, upl, _ := newTestServiceWithPublisher(t)
+	return service, store, upl
+}
+
+// newTestServiceWithPublisher arma el servicio con el doble del puerto de recomendaciones, para
+// los tests que además afirman qué se notificó.
+func newTestServiceWithPublisher(t *testing.T) (*employeeService, *fakeEmployeeStore, *fakeUploader, *fakeEmployeePublisher) {
+	t.Helper()
 	store := &fakeEmployeeStore{}
 	upl := newFakeUploader()
-	return NewService(store, upl).(*employeeService), store, upl
+	publisher := &fakeEmployeePublisher{}
+	return NewService(store, upl, publisher).(*employeeService), store, upl, publisher
 }
 
 func TestCreateEmployeeUploadMetadata(t *testing.T) {

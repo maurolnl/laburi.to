@@ -73,11 +73,23 @@ func (h *EmployeeHandler) UpdateAvailability(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *employeeService) CreateAvailability(ctx context.Context, employeeID int32, availabilityRequest CreateEmployeeProfileAvailabilityRequest) error {
-	return s.repo.CreateAvailability(ctx, employeeID, availabilityRequest)
+	if err := s.repo.CreateAvailability(ctx, employeeID, availabilityRequest); err != nil {
+		return err
+	}
+
+	s.profileChanged(ctx, employeeID)
+
+	return nil
 }
 
 func (s *employeeService) UpdateAvailability(ctx context.Context, employeeID int32, availabilityRequest CreateEmployeeProfileAvailabilityRequest) error {
-	return s.repo.UpdateAvailability(ctx, employeeID, availabilityRequest)
+	if err := s.repo.UpdateAvailability(ctx, employeeID, availabilityRequest); err != nil {
+		return err
+	}
+
+	s.profileChanged(ctx, employeeID)
+
+	return nil
 }
 
 func (r *EmployeeRepository) CreateAvailability(ctx context.Context, employeeID int32, availabilityRequest CreateEmployeeProfileAvailabilityRequest) error {

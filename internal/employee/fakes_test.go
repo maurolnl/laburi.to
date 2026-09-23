@@ -207,6 +207,13 @@ type fakeEmployeeStore struct {
 	updateAvailabilityErr error
 	createEducationErr    error
 	updateEducationErr    error
+
+	// profileComplete es la respuesta de IsProfileComplete y profileCompleteCalls registra por
+	// qué empleado se preguntó. El valor por defecto es false: un test que espera notificación
+	// tiene que declararlo, así que no hay disparo accidental.
+	profileComplete      bool
+	profileCompleteErr   error
+	profileCompleteCalls []int32
 }
 
 type storeCreateEmployeeCall struct {
@@ -290,6 +297,13 @@ func (f *fakeEmployeeStore) UpdateEducation(ctx context.Context, employeeID int3
 	return f.updateEducationErr
 }
 
+func (f *fakeEmployeeStore) IsProfileComplete(_ context.Context, employeeID int32) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.profileCompleteCalls = append(f.profileCompleteCalls, employeeID)
+	return f.profileComplete, f.profileCompleteErr
+}
+
 func (f *fakeEmployeeStore) GetEmployee(ctx context.Context, ID int32) (Employee, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -337,4 +351,31 @@ func (f *fakeUploader) Upload(ctx context.Context, input uploader.UploadInput) (
 func (f *fakeUploader) Delete(ctx context.Context, bucket, key string) error {
 	f.deleteCalls <- deleteCall{Bucket: bucket, Key: key}
 	return f.deleteErr
+}
+
+// fakeEmployeePublisher es el doble del puerto de recomendaciones. Toda la suite lo usa en
+// lugar de SQS: ninguna prueba del paquete abre red, lee entorno ni necesita credenciales.
+//
+// Registra identificadores y no perfiles porque eso es todo lo que el puerto transporta: si
+// alguna vez recibiera el perfil, este doble dejaría de compilar.
+type fakeEmployeePublisher struct {
+	mu sync.Mutex
+
+	err       error
+	published []int32
+}
+
+var _ EmployeeEventPublisher = (*fakeEmployeePublisher)(nil)
+
+func (f *fakeEmployeePublisher) EmployeeProfileCompleted(_ context.Context, employeeID int32) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.published = append(f.published, employeeID)
+	return f.err
+}
+
+func (f *fakeEmployeePublisher) calls() []int32 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]int32(nil), f.published...)
 }

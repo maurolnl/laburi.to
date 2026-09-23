@@ -75,14 +75,26 @@ func (s *employeeService) CreateTech(ctx context.Context, employeeID int32, tech
 	if techRequest.PaidSoftware == nil {
 		techRequest.PaidSoftware = []string{}
 	}
-	return s.repo.CreateTech(ctx, employeeID, techRequest)
+	if err := s.repo.CreateTech(ctx, employeeID, techRequest); err != nil {
+		return err
+	}
+
+	s.profileChanged(ctx, employeeID)
+
+	return nil
 }
 
 func (s *employeeService) UpdateTech(ctx context.Context, employeeID int32, techRequest CreateEmployeeTechRequest) error {
 	if techRequest.PaidSoftware == nil {
 		techRequest.PaidSoftware = []string{}
 	}
-	return s.repo.UpdateTech(ctx, employeeID, techRequest)
+	if err := s.repo.UpdateTech(ctx, employeeID, techRequest); err != nil {
+		return err
+	}
+
+	s.profileChanged(ctx, employeeID)
+
+	return nil
 }
 
 func (r *EmployeeRepository) CreateTech(ctx context.Context, employeeID int32, techRequest CreateEmployeeTechRequest) error {

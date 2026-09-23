@@ -217,13 +217,18 @@ func (s *employeeService) CreateEmployee(ctx context.Context, employeeReq Create
 		}
 	}
 
-	_, err := s.repo.CreateEmployee(ctx, employeeReq, principal.UserID, fileMetadata)
+	employeeID, err := s.repo.CreateEmployee(ctx, employeeReq, principal.UserID, fileMetadata)
 	if err != nil {
 		if fileMetadata != nil {
 			go s.cleanupOrphanFile(uploadedBucket, uploadedKey)
 		}
 		return err
 	}
+
+	// Un perfil recién creado nunca puede estar completo, pero la comprobación se hace igual:
+	// dejar la regla en nueve lugares con una excepción en el décimo es lo que después se
+	// olvida de actualizar.
+	s.profileChanged(ctx, employeeID)
 
 	return nil
 }
@@ -261,6 +266,8 @@ func (s *employeeService) UpdateEmployee(ctx context.Context, employeeID int32, 
 		}
 		return err
 	}
+
+	s.profileChanged(ctx, employeeID)
 
 	return nil
 }
