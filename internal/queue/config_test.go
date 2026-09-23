@@ -37,6 +37,9 @@ func TestLoadConfigDisabledDoesNotReadAnyOtherVariable(t *testing.T) {
 		{name: "flag blank", value: "   ", set: true},
 		{name: "flag false", value: "false", set: true},
 		{name: "flag zero", value: "0", set: true},
+		// Un interruptor ilegible cuenta como apagado, así que tampoco habilita la lectura
+		// del resto de la configuración.
+		{name: "flag unreadable", value: "yes", set: true},
 	}
 
 	for _, tt := range tests {
@@ -65,14 +68,61 @@ func TestLoadConfigDisabledDoesNotReadAnyOtherVariable(t *testing.T) {
 
 // Un typo en el flag no debe apagar la cola en silencio: ese es exactamente el modo de fallo
 // que el ticket quiere evitar.
-func TestLoadConfigRejectsUnparseableFlag(t *testing.T) {
-	_, err := LoadConfig(envLookup(map[string]string{EnvEnabled: "yes"}))
-
-	if !errors.Is(err, ErrInvalidQueueConfig) {
-		t.Fatalf("LoadConfig() = %v, want ErrInvalidQueueConfig", err)
+// Un interruptor ilegible describe si la funcionalidad participa, no cómo: degrada a apagado
+// y no derriba el arranque. La advertencia es lo que evita que el typo pase inadvertido.
+func TestLoadConfigLeavesAnUnreadableSwitchDisabled(t *testing.T) {
+	cfg, err := LoadConfig(envLookup(map[string]string{EnvEnabled: "yes"}))
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v, an unreadable switch must not abort startup", err)
 	}
-	if !strings.Contains(err.Error(), EnvEnabled) {
-		t.Errorf("the error must name %s, got %q", EnvEnabled, err)
+	if cfg.Enabled {
+		t.Fatal("an unreadable switch must leave the transport disabled")
+	}
+	if len(cfg.Warnings) != 1 {
+		t.Fatalf("Warnings = %v, want exactly one", cfg.Warnings)
+	}
+	if !strings.Contains(cfg.Warnings[0], EnvEnabled) {
+		t.Fatalf("the warning must name %s, got %q", EnvEnabled, cfg.Warnings[0])
+	}
+}
+
+func TestLoadWorkerConfigLeavesAnUnreadableSwitchDisabled(t *testing.T) {
+	cfg, err := LoadWorkerConfig(envLookup(map[string]string{EnvWorkerEnabled: "si"}))
+	if err != nil {
+		t.Fatalf("LoadWorkerConfig() error = %v, an unreadable switch must not abort startup", err)
+	}
+	if cfg.Enabled {
+		t.Fatal("an unreadable switch must leave the worker disabled")
+	}
+	if len(cfg.Warnings) != 1 || !strings.Contains(cfg.Warnings[0], EnvWorkerEnabled) {
+		t.Fatalf("Warnings = %v, want one naming %s", cfg.Warnings, EnvWorkerEnabled)
+	}
+}
+
+// Apagar a propósito no es una degradación: no hay nada que corregir y no debe advertirse.
+func TestDeliberatelyDisabledSwitchesWarnAboutNothing(t *testing.T) {
+	for _, value := range []struct {
+		name string
+		env  map[string]string
+	}{
+		{name: "absent", env: map[string]string{}},
+		{name: "empty", env: map[string]string{EnvEnabled: "", EnvWorkerEnabled: ""}},
+		{name: "blank", env: map[string]string{EnvEnabled: "   ", EnvWorkerEnabled: "   "}},
+		{name: "false", env: map[string]string{EnvEnabled: "false", EnvWorkerEnabled: "0"}},
+	} {
+		t.Run(value.name, func(t *testing.T) {
+			cfg, err := LoadConfig(envLookup(value.env))
+			if err != nil {
+				t.Fatalf("LoadConfig() error = %v", err)
+			}
+			workerCfg, err := LoadWorkerConfig(envLookup(value.env))
+			if err != nil {
+				t.Fatalf("LoadWorkerConfig() error = %v", err)
+			}
+			if len(cfg.Warnings) != 0 || len(workerCfg.Warnings) != 0 {
+				t.Fatalf("no warning expected, got %v and %v", cfg.Warnings, workerCfg.Warnings)
+			}
+		})
 	}
 }
 
@@ -259,14 +309,28 @@ func TestLoadConfigEndpointIsOptional(t *testing.T) {
 func TestLoadConfigErrorsNeverLeakValues(t *testing.T) {
 	const secret = "AKIAIOSFODNN7EXAMPLE-super-secret"
 
+	// La advertencia del interruptor sigue la misma regla que los errores: nombra la variable
+	// y nunca su valor.
+	t.Run("switch warning", func(t *testing.T) {
+		cfg, err := LoadConfig(envLookup(map[string]string{EnvEnabled: secret}))
+		if err != nil {
+			t.Fatalf("LoadConfig() error = %v", err)
+		}
+		if len(cfg.Warnings) != 1 {
+			t.Fatalf("Warnings = %v, want exactly one", cfg.Warnings)
+		}
+		if strings.Contains(cfg.Warnings[0], secret) {
+			t.Fatalf("the warning leaked the value: %q", cfg.Warnings[0])
+		}
+		if !strings.Contains(cfg.Warnings[0], EnvEnabled) {
+			t.Fatalf("the warning must name %s, got %q", EnvEnabled, cfg.Warnings[0])
+		}
+	})
+
 	tests := []struct {
 		name string
 		env  map[string]string
 	}{
-		{
-			name: "unparseable flag",
-			env:  map[string]string{EnvEnabled: secret},
-		},
 		{
 			name: "invalid numeric value",
 			env: func() map[string]string {
@@ -386,23 +450,6 @@ func TestLoadWorkerConfigDefaultsToOff(t *testing.T) {
 	}
 	if cfg.Enabled {
 		t.Fatal("the worker must stay off unless it is explicitly enabled")
-	}
-}
-
-// Un typo en el flag no debe apagar el worker sin avisar, igual que en el del transporte.
-func TestLoadWorkerConfigRejectsAnUnreadableFlag(t *testing.T) {
-	env := enabledEnv()
-	env[EnvWorkerEnabled] = "yes please"
-
-	_, err := LoadWorkerConfig(envLookup(env))
-	if !errors.Is(err, ErrInvalidQueueConfig) {
-		t.Fatalf("LoadConfig() error = %v, want ErrInvalidQueueConfig", err)
-	}
-	if !strings.Contains(err.Error(), EnvWorkerEnabled) {
-		t.Fatalf("the error must name the offending variable, got %q", err)
-	}
-	if strings.Contains(err.Error(), "yes please") {
-		t.Fatalf("the error must never include the value, got %q", err)
 	}
 }
 

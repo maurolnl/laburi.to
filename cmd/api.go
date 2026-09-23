@@ -114,7 +114,17 @@ func (app *application) mountQueue(ctx context.Context) error {
 	// arranque en vez de descubrirse por ausencia de resultados.
 	log.Printf("Recommendation queue enabled: %t \n", app.config.queueCfg.Enabled)
 
+	// Las advertencias distinguen un apagado deliberado de uno causado por un interruptor mal
+	// escrito. Sin ellas los dos se verían igual en el log de arriba.
+	app.logQueueWarnings()
+
 	return nil
+}
+
+func (app *application) logQueueWarnings() {
+	for _, warning := range append(app.config.queueCfg.Warnings, app.config.workerCfg.Warnings...) {
+		log.Printf("Recommendation configuration warning: %s \n", warning)
+	}
 }
 
 // startWorker arranca el consumidor de recomendaciones si esta instancia debe consumir.

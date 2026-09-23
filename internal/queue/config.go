@@ -82,6 +82,15 @@ type Config struct {
 	// EndpointURL apunta el cliente a un SQS local (LocalStack, ElasticMQ). Vacío significa
 	// resolver el endpoint real de AWS por región.
 	EndpointURL string
+
+	// Warnings son las degradaciones que hay que registrar en el arranque: hoy, un
+	// interruptor ilegible que dejó el transporte apagado.
+	//
+	// Viajan en el resultado y no en un log de este paquete a propósito. La configuración se
+	// resuelve con un Lookup inyectable justamente para ejercitarla sin tocar el entorno ni
+	// la salida del proceso de tests; un log.Printf acá ensuciaría toda la suite y haría que
+	// comprobar la advertencia exigiera capturar salida.
+	Warnings []string
 }
 
 // WorkerConfig decide si este proceso consume la cola.
@@ -93,43 +102,57 @@ type Config struct {
 // en vez de que el flag desaparezca en silencio.
 type WorkerConfig struct {
 	Enabled bool
+
+	// Warnings tiene el mismo significado y la misma razón de ser que Config.Warnings.
+	Warnings []string
 }
 
-// LoadWorkerConfig resuelve el flag del consumidor. Un valor que no se entienda es un error y
-// no un silencioso false, por la misma razón que en el flag del transporte: un typo no debe
-// apagar el worker sin avisar.
+// LoadWorkerConfig resuelve el flag del consumidor. Un valor que no se entienda deja el
+// worker apagado y produce una advertencia, igual que el flag del transporte: apagar es la
+// degradación segura y la advertencia evita que un typo pase inadvertido.
+//
+// Devuelve error para no cerrarle la puerta a una validación futura, aunque hoy ningún
+// camino lo produzca.
 //
 // Habilitado no alcanza para arrancar: sin transporte no hay de dónde consumir. Esa
 // comprobación pertenece a quien monta el worker, que es el único que ve las dos
 // configuraciones.
 func LoadWorkerConfig(lookup Lookup) (WorkerConfig, error) {
-	enabled, err := lookupBool(lookup, EnvWorkerEnabled)
-	if err != nil {
-		return WorkerConfig{}, err
+	enabled, warning := lookupSwitch(lookup, EnvWorkerEnabled)
+
+	cfg := WorkerConfig{Enabled: enabled}
+	if warning != "" {
+		cfg.Warnings = append(cfg.Warnings, warning)
 	}
 
-	return WorkerConfig{Enabled: enabled}, nil
+	return cfg, nil
 }
 
 // LoadConfig resuelve y valida la configuración del transporte.
 //
 // Con el flag apagado devuelve Config{Enabled: false} sin error y sin consultar ninguna
-// otra variable. Con el flag encendido, toda variable obligatoria ausente o vacía produce
-// un error que envuelve ErrMissingQueueConfig, y todo valor numérico ilegible o fuera de
-// rango uno que envuelve ErrInvalidQueueConfig.
+// otra variable. Un flag ilegible cuenta como apagado y suma una advertencia, en vez de
+// abortar: es un interruptor, y una funcionalidad apagada no debe impedir que la aplicación
+// arranque. Con el flag encendido, toda variable obligatoria ausente o vacía produce un
+// error que envuelve ErrMissingQueueConfig, y todo valor numérico ilegible o fuera de rango
+// uno que envuelve ErrInvalidQueueConfig: esos describen cómo participa un transporte ya
+// encendido, y adivinarlos haría desaparecer mensajes.
 //
 // Los mensajes nombran la variable responsable y nunca incluyen su valor: los valores
 // vienen del entorno y un secreto pegado en la variable equivocada terminaría en los logs.
 func LoadConfig(lookup Lookup) (Config, error) {
-	enabled, err := lookupBool(lookup, EnvEnabled)
-	if err != nil {
-		return Config{}, err
-	}
-	if !enabled {
-		return Config{Enabled: false}, nil
+	enabled, warning := lookupSwitch(lookup, EnvEnabled)
+
+	var warnings []string
+	if warning != "" {
+		warnings = append(warnings, warning)
 	}
 
-	cfg := Config{Enabled: true}
+	if !enabled {
+		return Config{Enabled: false, Warnings: warnings}, nil
+	}
+
+	cfg := Config{Enabled: true, Warnings: warnings}
 
 	for _, required := range []struct {
 		key    string
@@ -175,21 +198,33 @@ func LoadConfig(lookup Lookup) (Config, error) {
 	return cfg, nil
 }
 
-// lookupBool interpreta el flag de habilitación. Ausente o vacío significa deshabilitado;
-// cualquier valor que strconv no entienda es un error y no un silencioso "false": un typo
-// en el flag no debe apagar la cola sin avisar.
-func lookupBool(lookup Lookup, key string) (bool, error) {
+// lookupSwitch interpreta un interruptor de habilitación. Ausente, vacío o ilegible
+// significan deshabilitado; el segundo valor es la advertencia a registrar, vacía cuando no
+// hay nada que corregir.
+//
+// Un valor ilegible degrada a apagado y no aborta el arranque porque el interruptor describe
+// si una funcionalidad participa, no cómo participa. Apagar es la única degradación segura:
+// encender por error un transporte cuya configuración nadie revisó llevaría a fallos contra
+// una cola que quizá no existe, mientras que apagado lo peor que pasa es que no se generen
+// recomendaciones, que es el estado actual del producto.
+//
+// La advertencia conserva la intención original —un typo no debe apagar la cola en
+// silencio— sin el precio de que una funcionalidad apagada impida levantar la aplicación.
+// Nombra la variable y nunca incluye su valor, igual que los errores: los valores vienen del
+// entorno y un secreto pegado en la variable equivocada no debe terminar en un log.
+func lookupSwitch(lookup Lookup, key string) (enabled bool, warning string) {
 	raw, ok := lookup(key)
-	if !ok || strings.TrimSpace(raw) == "" {
-		return false, nil
+	trimmed := strings.TrimSpace(raw)
+	if !ok || trimmed == "" {
+		return false, ""
 	}
 
-	value, err := strconv.ParseBool(strings.TrimSpace(raw))
+	value, err := strconv.ParseBool(trimmed)
 	if err != nil {
-		return false, fmt.Errorf("%w: %s must be a boolean", ErrInvalidQueueConfig, key)
+		return false, fmt.Sprintf("%s is not a boolean: leaving it disabled", key)
 	}
 
-	return value, nil
+	return value, ""
 }
 
 func lookupRequired(lookup Lookup, key string) (string, error) {

@@ -35,8 +35,8 @@ defecto. Un sujeto sin candidatos sí completa, con conjunto vacío.
 
 | Variable | Obligatoria | Default | Rango |
 | --- | --- | --- | --- |
-| `RECOMMENDATIONS_QUEUE_ENABLED` | no | `false` | booleano que entienda Go (`true`, `false`, `1`, `0`) |
-| `RECOMMENDATIONS_WORKER_ENABLED` | no | `false` | booleano que entienda Go |
+| `RECOMMENDATIONS_QUEUE_ENABLED` | no | `false` | booleano que entienda Go (`true`, `false`, `1`, `0`); ilegible ⇒ `false` con advertencia |
+| `RECOMMENDATIONS_WORKER_ENABLED` | no | `false` | ídem |
 | `AWS_REGION` | sí, con la cola habilitada | — | no vacío |
 | `AWS_SQS_RECOMMENDATIONS_QUEUE_URL` | sí, con la cola habilitada | — | no vacío |
 | `AWS_SQS_RECOMMENDATIONS_DLQ_URL` | sí, con la cola habilitada | — | no vacío |
@@ -50,6 +50,12 @@ Notas:
 
 - **Un valor vacío o solo con espacios equivale a ausente.** Para las obligatorias eso aborta
   el arranque; para las opcionales, aplica el default.
+- **Los dos interruptores nunca abortan el arranque.** Un valor que no se pueda interpretar
+  —`si`, `yes`, `on`— los deja **apagados** y produce una advertencia en el log que nombra la
+  variable. Describen *si* la funcionalidad participa, no *cómo*, y una funcionalidad apagada
+  no debe impedir que la aplicación levante. El resto sí aborta: con la cola habilitada, una
+  variable obligatoria ausente o un valor numérico fuera de rango describen cómo participa un
+  transporte encendido, y adivinarlos haría desaparecer mensajes.
 - **`AWS_REGION` se comparte con S3.** `internal/uploader` la trata como opcional y cae a
   `us-east-2`; acá es obligatoria con la cola habilitada. La divergencia es deliberada: un
   bucket en la región equivocada da error visible, pero una cola en la región equivocada
