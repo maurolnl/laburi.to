@@ -35,9 +35,12 @@ type RecommendationStore interface {
 	// anterior.
 	CompleteBatch(ctx context.Context, batchID int32, candidates []Candidate) (Batch, error)
 
-	// JobRecommendationsForEmployee resuelve el estado vigente y el conjunto vigente de
-	// puestos recomendados a un empleado. El llamador no necesita conocer la regla que
-	// los distingue.
+	// JobRecommendationsForEmployee resuelve el estado vigente, el tramo pedido del conjunto
+	// vigente de puestos recomendados a un empleado y el tamaño total de ese conjunto ya
+	// filtrado. El llamador no necesita conocer la regla que distingue estado de conjunto.
+	//
+	// El tramo y el total se resuelven contra el mismo batch completado, así que no pueden
+	// describir conjuntos distintos.
 	JobRecommendationsForEmployee(ctx context.Context, employeeID int32, page Page) (JobRecommendations, error)
 
 	// EmployeeRecommendationsForJobPosition hace lo propio en el sentido inverso.
@@ -45,14 +48,37 @@ type RecommendationStore interface {
 }
 
 // JobRecommendations combina el estado vigente del empleado con su conjunto vigente de
-// puestos. Status sale del batch más reciente; Items, del último batch completado.
+// puestos. Status sale del batch más reciente; Items y Total, del último batch completado.
 type JobRecommendations struct {
 	Status BatchStatus         `json:"status"`
 	Items  []JobRecommendation `json:"items"`
+	Total  int32               `json:"total"`
 }
 
 // EmployeeRecommendations es el equivalente para un puesto.
 type EmployeeRecommendations struct {
 	Status BatchStatus              `json:"status"`
 	Items  []EmployeeRecommendation `json:"items"`
+	Total  int32                    `json:"total"`
+}
+
+// SubjectOwnership resuelve a quién pertenece un sujeto. Es un puerto separado de
+// RecommendationStore porque responde a una pregunta distinta —quién puede consultar— y
+// quien solo lee recomendaciones no necesita depender de él.
+//
+// Ambas operaciones devuelven ErrSubjectNotFound cuando el sujeto no existe. Para un puesto,
+// «no existe» incluye el eliminado lógicamente: a efectos de autorización son la misma cosa,
+// y distinguirlos le revelaría a un tercero que alguna vez hubo un puesto con ese
+// identificador.
+type SubjectOwnership interface {
+	EmployeeOwner(ctx context.Context, employeeID int32) (int32, error)
+	JobPositionOwner(ctx context.Context, jobPositionID int32) (JobPositionOwner, error)
+}
+
+// JobPositionOwner son las dos identidades que cuelgan de un puesto activo: el empleador al
+// que pertenece y el usuario dueño de ese empleador. La autorización compara el usuario; el
+// empleador queda disponible para diagnóstico.
+type JobPositionOwner struct {
+	EmployerID int32
+	UserID     int32
 }

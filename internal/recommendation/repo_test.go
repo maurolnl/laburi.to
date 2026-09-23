@@ -485,3 +485,114 @@ func TestOrdenYPaginacionDeEmpleados(t *testing.T) {
 		t.Fatalf("la página no respeta el orden global: %+v", page.Items)
 	}
 }
+
+func TestTotalDelConjuntoVigente(t *testing.T) {
+	db := testsupport.PostgresDB(t)
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	employerID := newTestEmployer(t, db)
+
+	t.Run("total sobre un conjunto paginado", func(t *testing.T) {
+		employeeID := newTestEmployee(t, db)
+		jobs := []int32{
+			newTestJobPosition(t, db, employerID),
+			newTestJobPosition(t, db, employerID),
+			newTestJobPosition(t, db, employerID),
+		}
+
+		batch, err := repo.CreateBatch(ctx, NewEmployeeSubject(employeeID))
+		if err != nil {
+			t.Fatalf("crear batch: %v", err)
+		}
+		candidates := make([]Candidate, 0, len(jobs))
+		for i, jobID := range jobs {
+			candidates = append(candidates, Candidate{EmployeeID: employeeID, JobPositionID: jobID, Score: scorePtr(float64(i) / 10)})
+		}
+		if _, err := repo.CompleteBatch(ctx, batch.ID, candidates); err != nil {
+			t.Fatalf("completar: %v", err)
+		}
+
+		page, err := repo.JobRecommendationsForEmployee(ctx, employeeID, Page{Limit: 1, Offset: 0})
+		if err != nil {
+			t.Fatalf("leer: %v", err)
+		}
+		if len(page.Items) != 1 {
+			t.Fatalf("la página debería traer 1 item, trajo %d", len(page.Items))
+		}
+		if page.Total != int32(len(jobs)) {
+			t.Fatalf("el total debería ser %d, fue %d", len(jobs), page.Total)
+		}
+	})
+
+	t.Run("total sin puestos eliminados", func(t *testing.T) {
+		employeeID := newTestEmployee(t, db)
+		activeJob := newTestJobPosition(t, db, employerID)
+		doomedJob := newTestJobPosition(t, db, employerID)
+
+		batch, err := repo.CreateBatch(ctx, NewEmployeeSubject(employeeID))
+		if err != nil {
+			t.Fatalf("crear batch: %v", err)
+		}
+		if _, err := repo.CompleteBatch(ctx, batch.ID, []Candidate{
+			{EmployeeID: employeeID, JobPositionID: activeJob, Score: scorePtr(0.9)},
+			{EmployeeID: employeeID, JobPositionID: doomedJob, Score: scorePtr(0.8)},
+		}); err != nil {
+			t.Fatalf("completar: %v", err)
+		}
+
+		if _, err := db.ExecContext(ctx, `UPDATE job_positions SET deleted_at = now() WHERE id = $1`, doomedJob); err != nil {
+			t.Fatalf("eliminar el puesto: %v", err)
+		}
+
+		result, err := repo.JobRecommendationsForEmployee(ctx, employeeID, fullPage())
+		if err != nil {
+			t.Fatalf("leer: %v", err)
+		}
+		if result.Total != 1 {
+			t.Fatalf("el total debería contar solo el puesto activo, fue %d", result.Total)
+		}
+	})
+
+	t.Run("sujeto sin batch completado", func(t *testing.T) {
+		employeeID := newTestEmployee(t, db)
+		if _, err := repo.CreateBatch(ctx, NewEmployeeSubject(employeeID)); err != nil {
+			t.Fatalf("crear batch: %v", err)
+		}
+
+		result, err := repo.JobRecommendationsForEmployee(ctx, employeeID, fullPage())
+		if err != nil {
+			t.Fatalf("leer: %v", err)
+		}
+		if result.Total != 0 || len(result.Items) != 0 {
+			t.Fatalf("sin batch completado el total y el tramo deberían estar vacíos, se obtuvo %+v", result)
+		}
+	})
+
+	t.Run("desplazamiento más allá del conjunto", func(t *testing.T) {
+		employerID := newTestEmployer(t, db)
+		jobPositionID := newTestJobPosition(t, db, employerID)
+		employeeID := newTestEmployee(t, db)
+
+		batch, err := repo.CreateBatch(ctx, NewJobPositionSubject(jobPositionID))
+		if err != nil {
+			t.Fatalf("crear batch: %v", err)
+		}
+		if _, err := repo.CompleteBatch(ctx, batch.ID, []Candidate{
+			{EmployeeID: employeeID, JobPositionID: jobPositionID, Score: scorePtr(0.9)},
+		}); err != nil {
+			t.Fatalf("completar: %v", err)
+		}
+
+		result, err := repo.EmployeeRecommendationsForJobPosition(ctx, jobPositionID, Page{Limit: 10, Offset: 50})
+		if err != nil {
+			t.Fatalf("leer: %v", err)
+		}
+		if len(result.Items) != 0 {
+			t.Fatalf("un desplazamiento fuera del conjunto no debería traer items, trajo %d", len(result.Items))
+		}
+		if result.Total != 1 {
+			t.Fatalf("el total debería conservar el tamaño real del conjunto, fue %d", result.Total)
+		}
+	})
+}

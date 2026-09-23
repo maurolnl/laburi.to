@@ -210,3 +210,38 @@ ORDER BY id;
 -- el batch sin recomendaciones, el segundo es un candidato válido.
 -- name: EmployeeExists :one
 SELECT EXISTS (SELECT 1 FROM employees WHERE id = $1);
+
+-- Resolución de propiedad para autorizar las consultas del borde HTTP. Viven acá y no en
+-- employees.sql ni job_positions.sql porque las consume internal/recommendation, que no
+-- importa los paquetes de dominio de empleado ni de puesto.
+-- name: GetEmployeeOwner :one
+SELECT user_id
+FROM employees
+WHERE id = $1;
+
+-- El puesto eliminado lógicamente es inexistente a efectos de autorización: quien lo consulta
+-- recibe el mismo 404 que ante un identificador que nunca existió, sin poder distinguir si
+-- alguna vez hubo un puesto ahí.
+-- name: GetJobPositionOwner :one
+SELECT j.employer_id, e.user_id
+FROM job_positions j
+JOIN employers e ON e.id = j.employer_id
+WHERE j.id = $1
+  AND j.deleted_at IS NULL;
+
+-- Los conteos repiten exactamente los joins y filtros de sus listados. Una diferencia entre
+-- ambos haría que el total describiera un conjunto distinto del que se pagina.
+-- name: CountJobRecommendationsForEmployee :one
+SELECT count(*)
+FROM recommendations r
+JOIN job_positions j ON j.id = r.job_position_id
+WHERE r.batch_id = $1
+  AND j.deleted_at IS NULL;
+
+-- name: CountEmployeeRecommendationsForJobPosition :one
+SELECT count(*)
+FROM recommendations r
+JOIN employees e ON e.id = r.employee_id
+JOIN job_positions j ON j.id = r.job_position_id
+WHERE r.batch_id = $1
+  AND j.deleted_at IS NULL;

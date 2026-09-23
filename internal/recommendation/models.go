@@ -118,11 +118,72 @@ type EmployeeRecommendation struct {
 	ProfileUpdatedAt  time.Time `json:"profile_updated_at"`
 }
 
-// Page acota una lectura del conjunto vigente. El cursor opaco, si se decide, es una
-// decisión del contrato HTTP y pertenece a LAB-35.
+// Page acota una lectura del conjunto vigente. El contrato HTTP expone límite y
+// desplazamiento y no un cursor opaco: el conjunto vigente es inmutable entre batches, así que
+// no hay inserciones intercaladas que corran la ventana, que es el problema que un cursor
+// resuelve.
 type Page struct {
 	Limit  int32
 	Offset int32
+}
+
+// PageInfo son los metadatos de paginación que viajan en la respuesta. Total es el tamaño del
+// conjunto vigente ya filtrado, para que el cliente sepa cuándo dejar de pedir páginas sin
+// tener que descubrirlo con una respuesta vacía.
+type PageInfo struct {
+	Limit  int32 `json:"limit"`
+	Offset int32 `json:"offset"`
+	Total  int32 `json:"total"`
+}
+
+// QueryStatus es el estado que el borde HTTP le informa al cliente. Replica los cuatro estados
+// de BatchStatus y agrega StatusNone.
+//
+// StatusNone no puede vivir en BatchStatus: ese tipo replica exactamente el check
+// recommendation_batches_status_check de la migración 0007, y agregarle un valor que la base no
+// conoce lo desalinearía del esquema. «Nunca se solicitó una generación» tampoco es un estado
+// de batch, justamente porque no hay batch.
+type QueryStatus string
+
+const (
+	StatusNone       QueryStatus = "none"
+	StatusPending    QueryStatus = "pending"
+	StatusProcessing QueryStatus = "processing"
+	StatusCompleted  QueryStatus = "completed"
+	StatusFailed     QueryStatus = "failed"
+)
+
+// queryStatusFrom traduce el estado del batch vigente al estado de transporte. Un estado que la
+// base aceptó pero este código no conoce se informa como StatusNone en vez de propagarse tal
+// cual: el cliente distingue cinco valores y no debe recibir un sexto.
+func queryStatusFrom(status BatchStatus) QueryStatus {
+	switch status {
+	case BatchPending:
+		return StatusPending
+	case BatchProcessing:
+		return StatusProcessing
+	case BatchCompleted:
+		return StatusCompleted
+	case BatchFailed:
+		return StatusFailed
+	default:
+		return StatusNone
+	}
+}
+
+// JobRecommendationsResponse y EmployeeRecommendationsResponse son la forma exacta del cuerpo
+// que devuelven las dos consultas. Items nunca es nil: un arreglo vacío y null son cosas
+// distintas para el cliente, y el conjunto vacío es el caso más común de un usuario nuevo.
+type JobRecommendationsResponse struct {
+	Status QueryStatus         `json:"status"`
+	Items  []JobRecommendation `json:"items"`
+	Page   PageInfo            `json:"page"`
+}
+
+type EmployeeRecommendationsResponse struct {
+	Status QueryStatus              `json:"status"`
+	Items  []EmployeeRecommendation `json:"items"`
+	Page   PageInfo                 `json:"page"`
 }
 
 // id devuelve el identificador del sujeto sin importar su tipo. Sirve para diagnóstico: un
