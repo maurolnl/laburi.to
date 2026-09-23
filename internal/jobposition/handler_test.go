@@ -490,3 +490,35 @@ func TestJobPositionHandlerDoesNotReopenDeletedPositions(t *testing.T) {
 		})
 	}
 }
+
+// TestJobPositionHandlerSurvivesPublisherFailure ejerce el borde HTTP contra el servicio real
+// con un publicador que falla: el alta y la edición ya están persistidas, así que el cliente
+// recibe su código de éxito y no un error por algo que ocurre después de su cambio.
+func TestJobPositionHandlerSurvivesPublisherFailure(t *testing.T) {
+	tests := []struct {
+		route
+		wantStatus int
+	}{
+		{route{"create", http.MethodPost, employerJobsPath(), validBody(t)}, http.StatusCreated},
+		{route{"update", http.MethodPut, jobPath(), validBody(t)}, http.StatusOK},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := ownedStore()
+			publisher := &fakePublisher{err: errors.New("queue unavailable")}
+
+			recorder := doRequest(t, newTestMuxWithService(NewService(store, publisher)), tt.method, tt.target, tt.body, employerToken(t))
+
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d (%s)", recorder.Code, tt.wantStatus, recorder.Body.String())
+			}
+			if store.writeCalls() != 1 {
+				t.Fatalf("%s did not persist its change: %#v", tt.name, store)
+			}
+			if len(publisher.published) != 1 || publisher.published[0] != newTestJobPosition().ID {
+				t.Fatalf("published = %#v, want exactly the job position id", publisher.published)
+			}
+		})
+	}
+}

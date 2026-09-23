@@ -14,6 +14,14 @@ type EmployeeStore interface {
 	CreateEducation(ctx context.Context, employeeID int32, educationRequest CreateEmployeeEducationRequest) error
 	UpdateEducation(ctx context.Context, employeeID int32, educationRequest CreateEmployeeEducationRequest) error
 	GetEmployee(ctx context.Context, ID int32) (Employee, error)
+
+	// IsProfileComplete responde si el empleado tiene sus cinco pasos presentes: registro base,
+	// locación, recursos técnicos, disponibilidad y al menos un título de educación. Es la
+	// condición que habilita a solicitar la regeneración de sus recomendaciones.
+	//
+	// Un empleado inexistente devuelve false sin error: quien pregunta quiere saber si
+	// corresponde disparar, no si el empleado existe.
+	IsProfileComplete(ctx context.Context, employeeID int32) (bool, error)
 }
 
 type EmployeeFileMetadata struct {

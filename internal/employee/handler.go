@@ -1,5 +1,12 @@
-// Package employee provides HTTP handlers and business logic
-// managing employee profiles
+// Package employee expone el contrato HTTP protegido con el que un usuario autenticado crea y
+// completa por etapas su perfil de empleado: registro base, locación, recursos técnicos,
+// disponibilidad y educación, más los certificados PDF asociados.
+//
+// Después de cada escritura ya persistida se consulta si el perfil quedó completo —las cinco
+// etapas presentes— y solo entonces se notifica EmployeeEventPublisher, el puerto por el que la
+// épica de recomendaciones se entera del cambio sin acoplar este paquete a ninguna tecnología
+// de cola. Un perfil incompleto no genera trabajo, y un fallo de la notificación no invalida la
+// escritura ya confirmada.
 package employee
 
 import (
@@ -22,8 +29,8 @@ func NewHandler(service EmployeeService, validate *validator.Validate) *Employee
 	}
 }
 
-func BuildHandlers(store EmployeeStore, validate *validator.Validate, uploader uploader.Service) *EmployeeHandler {
-	employeeService := NewService(store, uploader)
+func BuildHandlers(store EmployeeStore, validate *validator.Validate, uploader uploader.Service, publisher EmployeeEventPublisher) *EmployeeHandler {
+	employeeService := NewService(store, uploader, publisher)
 	employeeHandler := NewHandler(employeeService, validate)
 
 	return employeeHandler

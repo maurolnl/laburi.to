@@ -27,15 +27,24 @@ type EmployeeService interface {
 }
 
 type employeeService struct {
-	repo     EmployeeStore
-	uploader uploader.Service
+	repo      EmployeeStore
+	uploader  uploader.Service
+	publisher EmployeeEventPublisher
 }
 
-func NewService(repo EmployeeStore, uploader uploader.Service) EmployeeService {
+func NewService(repo EmployeeStore, uploader uploader.Service, publisher EmployeeEventPublisher) EmployeeService {
 	return &employeeService{
-		repo:     repo,
-		uploader: uploader,
+		repo:      repo,
+		uploader:  uploader,
+		publisher: publisher,
 	}
+}
+
+// profileChanged cierra el ciclo de toda escritura de perfil ya persistida: si el perfil quedó
+// completo, solicita regenerar sus recomendaciones. No devuelve nada porque ningún desenlace
+// de la emisión puede invalidar el cambio que la precedió.
+func (s *employeeService) profileChanged(ctx context.Context, employeeID int32) {
+	publishIfComplete(ctx, s.repo, s.publisher, employeeID)
 }
 
 func (s *employeeService) cleanupOrphanFile(bucket, key string) {

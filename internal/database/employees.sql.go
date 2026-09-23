@@ -585,6 +585,33 @@ func (q *Queries) GetEmployeeProfileTech(ctx context.Context, employeeID int32) 
 	return i, err
 }
 
+const isEmployeeProfileComplete = `-- name: IsEmployeeProfileComplete :one
+SELECT (
+    EXISTS (SELECT 1 FROM employees e WHERE e.id = $1)
+    AND EXISTS (SELECT 1 FROM employee_location l WHERE l.employee_id = $1)
+    AND EXISTS (SELECT 1 FROM employee_profile_tech t WHERE t.employee_id = $1)
+    AND EXISTS (SELECT 1 FROM employee_profile_availability a WHERE a.employee_id = $1)
+    AND EXISTS (SELECT 1 FROM employee_education ed WHERE ed.employee_id = $1)
+)::boolean AS complete
+`
+
+// Un perfil está completo cuando existen sus cinco pasos: el registro base, la locación, los
+// recursos técnicos, la disponibilidad y al menos un título de educación.
+//
+// La regla es que la fila exista, no que tenga datos. El paso de recursos técnicos admite `os`
+// y `paid_software` vacíos por validación, así que exigir contenido dejaría a esos perfiles
+// fuera para siempre. Es la misma lectura que hace has_tech_profile en la resolución de
+// candidatos.
+//
+// Un empleado inexistente devuelve false y no error: el llamador pregunta si corresponde
+// disparar, no si el empleado existe.
+func (q *Queries) IsEmployeeProfileComplete(ctx context.Context, id int32) (bool, error) {
+	row := q.db.QueryRowContext(ctx, isEmployeeProfileComplete, id)
+	var complete bool
+	err := row.Scan(&complete)
+	return complete, err
+}
+
 const updateEmployee = `-- name: UpdateEmployee :exec
 UPDATE employees
 SET

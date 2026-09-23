@@ -205,6 +205,8 @@ func (s *employeeService) CreateEducation(ctx context.Context, employeeID int32,
 		return err
 	}
 
+	s.profileChanged(ctx, employeeID)
+
 	return nil
 }
 
@@ -233,6 +235,8 @@ func (s *employeeService) UpdateEducation(ctx context.Context, employeeID int32,
 		cleanupUploadedDocuments(s, uploadedDocuments)
 		return err
 	}
+
+	s.profileChanged(ctx, employeeID)
 
 	return nil
 }

@@ -76,8 +76,10 @@ func (app *application) mountFeatureRoutes(mux *http.ServeMux, psqlDB *sql.DB) {
 	uploaderService := uploader.NewService(bucket, certificationsKeyPrefix)
 
 	validator := validator.New(validator.WithRequiredStructEnabled())
+	recommendationTrigger := app.recommendationTrigger(psqlDB)
+
 	employeeRepo := employee.NewRepository(psqlDB)
-	employeeHandler := employee.BuildHandlers(employeeRepo, validator, uploaderService)
+	employeeHandler := employee.BuildHandlers(employeeRepo, validator, uploaderService, recommendationTrigger)
 
 	employee.RegisterRoutes(mux, employeeHandler, employeeRepo, app.config.secretKey)
 
@@ -86,7 +88,7 @@ func (app *application) mountFeatureRoutes(mux *http.ServeMux, psqlDB *sql.DB) {
 	employer.RegisterRoutes(mux, employerHandler, app.config.secretKey)
 
 	jobPositionRepo := jobposition.NewRepository(psqlDB)
-	jobPositionHandler := jobposition.BuildHandlers(jobPositionRepo, jobposition.NoopEventPublisher{}, validator)
+	jobPositionHandler := jobposition.BuildHandlers(jobPositionRepo, recommendationTrigger, validator)
 	jobposition.RegisterRoutes(mux, jobPositionHandler, app.config.secretKey)
 
 	userHandler := user.BuildHandlers(database.New(psqlDB), app.config.secretKey, validator)
@@ -97,6 +99,25 @@ func (app *application) mountFeatureRoutes(mux *http.ServeMux, psqlDB *sql.DB) {
 	tzHandler := timezone.NewHandler(tzService)
 
 	tzHandler.RegisterRoutes(mux, app.config.secretKey)
+}
+
+// recommendationTrigger arma el disparador que los bordes de escritura de employee y
+// jobposition usan para solicitar la regeneración. El mismo valor satisface los puertos de los
+// dos paquetes, que reciben solo el identificador del sujeto.
+//
+// El interruptor de la cola decide sobre qué productor se arma, con el mismo criterio que
+// startWorker usa para consumir. Con el transporte deshabilitado, QueueJobPublisher abriría un
+// batch y lo dejaría en failed en cada alta y cada edición, porque queue.Disabled falla en vez
+// de simular éxito: un apagado deliberado quedaría convertido en un rastro de fallos que nadie
+// va a atender. NoopJobPublisher no abre nada.
+func (app *application) recommendationTrigger(psqlDB *sql.DB) recommendation.Trigger {
+	if !app.config.queueCfg.Enabled {
+		return recommendation.NewTrigger(recommendation.NoopJobPublisher{})
+	}
+
+	repo := recommendation.NewRepository(psqlDB)
+
+	return recommendation.NewTrigger(recommendation.NewQueueJobPublisher(repo, app.queueClient))
 }
 
 // mountQueue construye el transporte de recomendaciones y lo deja disponible en la

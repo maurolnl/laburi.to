@@ -39,8 +39,8 @@ defecto; sus variables y el arranque local están en `docs/recommendation-queue.
 - `sql/schema/`: migraciones PostgreSQL ordenadas e inmutables una vez aplicadas
   (`0001_employees` … `0005_add_user_roles_and_employers`).
 - Features: `user` (auth + roles), `employee`, `employer`, `jobposition`, `timezone`.
-- Persistencia sin HTTP: `internal/recommendation` (batches y recomendaciones; todavía
-  sin productor, worker ni endpoints).
+- Sin HTTP propio: `internal/recommendation` (batches y recomendaciones, productor, worker y
+  el adaptador `Trigger` que los bordes de escritura consumen; todavía sin endpoints).
 - Transversales: `internal/auth` (JWT, Argon2id, `UserRole`), `internal/files` (PDFs),
   `internal/uploader` (S3), `internal/scoring` (contrato inyectable de scoring),
   `internal/queue` (configuración y puerto de la cola SQS de recomendaciones),
@@ -55,6 +55,15 @@ defecto; sus variables y el arranque local están en `docs/recommendation-queue.
   o fuera de rango aborta el arranque con un mensaje que nombra la variable y nunca su
   valor. La entrega es al menos una vez: todo consumidor debe ser idempotente. Para tests,
   usar el doble de `internal/queue/queuetest`, nunca AWS real.
+- Disparadores de recomendaciones: `employee` y `jobposition` notifican su propio puerto
+  —`EmployeeEventPublisher` y `JobPositionEventPublisher`— con el **identificador del sujeto y
+  nada más**, después de persistir. `recommendation.Trigger` satisface ambos por tipado
+  estructural, así que ningún paquete importa a otro y `cmd` compone. Un perfil de empleado
+  dispara solo si está completo —las cinco etapas presentes, la fila existe aunque esté vacía—;
+  el soft delete de un puesto no dispara. Un fallo de la emisión **no** revierte el cambio ya
+  confirmado: se registra, el batch del sujeto queda en `failed` y la escritura siguiente
+  reintenta. Con la cola apagada se cablea `NoopJobPublisher` para no acumular batches
+  fallidos. Detalle en `docs/recommendation-queue.md`.
 - Divergencia conocida entre `internal/queue` e `internal/uploader`: `queue` exige
   `AWS_REGION` y devuelve error, `uploader` cae a `us-east-2` y aborta con `log.Fatal`
   dentro del paquete. En código nuevo seguir el patrón de `queue` —configuración validada

@@ -68,9 +68,21 @@ func (s *EmployeeHandler) UpdateLocation(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *employeeService) CreateLocation(ctx context.Context, employeeID int32, locationRequest CreateEmployeeLocationRequest) error {
-	return s.repo.CreateLocationWithConnections(ctx, employeeID, locationRequest)
+	if err := s.repo.CreateLocationWithConnections(ctx, employeeID, locationRequest); err != nil {
+		return err
+	}
+
+	s.profileChanged(ctx, employeeID)
+
+	return nil
 }
 
 func (s *employeeService) UpdateLocation(ctx context.Context, employeeID int32, locationRequest CreateEmployeeLocationRequest) error {
-	return s.repo.UpdateLocationWithConnections(ctx, employeeID, locationRequest)
+	if err := s.repo.UpdateLocationWithConnections(ctx, employeeID, locationRequest); err != nil {
+		return err
+	}
+
+	s.profileChanged(ctx, employeeID)
+
+	return nil
 }

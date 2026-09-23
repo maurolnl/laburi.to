@@ -21,9 +21,12 @@ el universo de candidatos activos, invoca el contrato de scoring y reemplaza el 
 vigente en una transacción, reconociendo el mensaje solo después de persistir el desenlace.
 Arranca como goroutine del mismo binario, detrás de `RECOMMENDATIONS_WORKER_ENABLED`.
 
-Todavía **no** implementados: los disparadores del dominio (LAB-34) y los endpoints de
-consulta (LAB-35). El productor existe pero **nadie lo llama**: `cmd/api.go` sigue cableando
-`jobposition.NoopEventPublisher{}`, así que hoy ninguna ruta publica nada.
+Implementado en LAB-34: los disparadores. Los bordes de escritura de `internal/employee` e
+`internal/jobposition` solicitan la regeneración a través de `recommendation.Trigger`, que
+`cmd/api.go` arma sobre el productor real cuando la cola está habilitada. Ver
+[Disparadores del dominio](#disparadores-del-dominio).
+
+Todavía **no** implementados: los endpoints de consulta (LAB-35).
 
 **Mientras el algoritmo de indicadores no exista, todo batch con candidatos termina en
 `failed`.** La única implementación de producción del contrato de scoring es
@@ -251,6 +254,75 @@ termina ahí.
 Queda una ventana conocida sin cubrir: si el proceso muere entre abrir el batch y publicar,
 ese batch queda `pending` sin mensaje y bloquea al sujeto. Cerrarla exige un outbox
 transaccional, desproporcionado para el volumen actual.
+
+## Disparadores del dominio
+
+Quién solicita una regeneración, y cuándo. Todo disparo ocurre **después** de que el cambio de
+dominio quedó persistido, y ninguna respuesta HTTP espera a que el trabajo se ejecute.
+
+| Operación | ¿Dispara? | Sujeto |
+| --- | --- | --- |
+| `POST /employers/{employerID}/jobs` | Sí | El puesto creado |
+| `PUT /jobs/{jobPositionID}` | Sí | El puesto editado |
+| `DELETE /jobs/{jobPositionID}` | No | — |
+| `POST /employees` | Solo si el perfil queda completo, que en un alta nunca ocurre | El empleado |
+| `PUT /employees/{employeeID}` | Solo si el perfil está completo | El empleado |
+| `POST\|PUT /employees/{employeeID}/location` | Solo si el perfil queda completo | El empleado |
+| `POST\|PUT /employees/{employeeID}/tech` | Solo si el perfil queda completo | El empleado |
+| `POST\|PUT /employees/{employeeID}/availability` | Solo si el perfil queda completo | El empleado |
+| `POST\|PUT /employees/{employeeID}/education` | Solo si el perfil queda completo | El empleado |
+
+Una operación rechazada por validación, autorización o error de persistencia no dispara nada:
+sin cambio confirmado no hay nada que regenerar. Tampoco existe reapertura de puestos, así que
+no hay ninguna operación que reactive un puesto eliminado y pueda disparar.
+
+### Qué significa "perfil completo"
+
+Un perfil de empleado está completo cuando existen sus **cinco etapas**: el registro base y una
+fila en cada una de `employee_location`, `employee_profile_tech`,
+`employee_profile_availability` y `employee_education`.
+
+La regla es que la fila **exista**, no que tenga datos. La etapa de recursos técnicos admite
+`os` y `paid_software` vacíos por validación, así que exigir contenido dejaría esos perfiles
+fuera para siempre. Es la misma lectura que hace `has_tech_profile` al resolver candidatos.
+
+La consulta es `IsEmployeeProfileComplete`, y se resuelve en una sola ida a la base después de
+cada escritura de perfil.
+
+### Los puertos no conocen la cola
+
+Los bordes de escritura no importan `internal/recommendation`: consumen un puerto propio
+—`employee.EmployeeEventPublisher` y `jobposition.JobPositionEventPublisher`— que recibe el
+**identificador del sujeto y nada más**. `recommendation.Trigger` satisface ambos por tipado
+estructural, así que ningún paquete importa a otro y la composición ocurre en `cmd`.
+
+### Qué pasa si la emisión falla
+
+El orden es: **persistir el dominio → responder al cliente → emitir**. Si la emisión falla,
+nada se revierte y la operación conserva su código de éxito: el alta o la edición ya ocurrieron
+y devolver un error haría que el cliente reintente algo que sí pasó.
+
+El fallo queda representado de forma **durable** por el batch del sujeto en `failed`, más una
+línea de diagnóstico que nombra al sujeto solo por su identificador. Un batch `failed` no
+bloquea al sujeto —el índice único parcial solo cubre `pending` y `processing`—, así que la
+escritura siguiente vuelve a intentarlo.
+
+No hay outbox ni reintento automático. Un outbox transaccional garantizaría no perder eventos,
+pero exige migración, un segundo ciclo de publicación y su propio backoff: es más máquina de la
+que esta épica necesita mientras el algoritmo de scoring no exista.
+
+**Con la cola deshabilitada no se dispara nada**, ni siquiera un batch `failed`.  `cmd/api.go`
+arma el trigger sobre `recommendation.NoopJobPublisher` en ese caso: un apagado deliberado no
+debe dejar un rastro de fallos que nadie va a atender. El estado del transporte ya es visible
+en el log de arranque.
+
+### Una ventana conocida
+
+Una edición que llega con el batch del sujeto **ya reclamado** (`processing`) se deduplica, y
+sus datos pueden no quedar reflejados en ese conjunto. El worker lee el estado desde la base al
+reclamar, así que una edición anterior al reclamo sí entra. La escritura siguiente del sujeto
+abre un batch nuevo. Cerrar la ventana exigiría marcar el sujeto como sucio y republicar al
+cerrar el batch, que cambia la deduplicación descrita arriba.
 
 ## Consumo del mensaje
 
