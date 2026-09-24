@@ -82,3 +82,18 @@ type JobPositionOwner struct {
 	EmployerID int32
 	UserID     int32
 }
+
+// ProfileAccess responde si un empleador tiene, hoy, una recomendación vigente que lo vincule
+// con un empleado. Es un tercer puerto y no un método de SubjectOwnership porque responde a una
+// pregunta distinta: no quién es dueño de un sujeto propio, sino si un tercero puede mirar un
+// sujeto ajeno.
+//
+// Lo consume internal/employee, que expone el perfil y no importa este paquete. Devuelve un
+// booleano y no el conjunto: quien pregunta solo necesita autorizar.
+type ProfileAccess interface {
+	// EmployerHasCurrentRecommendation responde si el conjunto vigente del empleado o el de
+	// alguno de los puestos activos del empleador contiene el par. Un empleado inexistente, un
+	// empleador sin puestos y un par sin vínculo devuelven false sin error propio: para quien
+	// autoriza los tres significan lo mismo, y distinguirlos revelaría si el empleado existe.
+	EmployerHasCurrentRecommendation(ctx context.Context, employeeID, employerUserID int32) (bool, error)
+}

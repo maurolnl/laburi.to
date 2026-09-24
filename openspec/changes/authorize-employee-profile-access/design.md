@@ -51,6 +51,11 @@ recomendación. La recomendación acá es una precondición de acceso, no el dat
 `internal/recommendation`; `cmd/api.go` cablea el repositorio de recomendaciones como
 implementación, igual que ya cablea el `Trigger`.
 
+La propiedad del perfil se resuelve con la lectura mínima —identificador y usuario dueño— y no
+con el perfil entero: de las tres rutas, dos no necesitan el perfil para nada, y autorizar
+leyendo el perfil completo de alguien ajeno es exactamente lo que la autorización debería
+impedir.
+
 ### La autorización vive en el servicio, no en un middleware
 
 `AuthenticatedEmployeeMiddleWare` resuelve propiedad y responde `403` a cualquiera que no sea
@@ -118,13 +123,17 @@ La vigencia sale de la misma definición que usa LAB-35 —último batch `comple
 `deleted_at IS NULL`—, así que el acceso no puede habilitar un perfil que el listado de
 candidatos ya no muestra.
 
-### El presignado entra por un puerto y la caducidad es constante
+### El presignado se suma a `uploader.Service` y la caducidad es constante
 
 `internal/uploader` gana `PresignGetObject` sobre `s3.NewPresignClient`, que el SDK ya trae; no
-hay dependencia nueva. `internal/employee` lo consume por una interfaz propia, `Presigner`, para
-que los tests de servicio puedan sustituirlo por un doble que registra bucket, clave y plazo sin
-tocar la red. Es la única forma de verificar «la URL corresponde al archivo pedido» sin firmar
-de verdad.
+hay dependencia nueva.
+
+Alternativa considerada: un puerto `Presigner` propio de `internal/employee`, para que los tests
+de servicio pudieran sustituirlo. Se descartó al implementar: `internal/employee` ya depende de
+`uploader.Service` para subir y borrar, y su doble de test ya la implementa. Un segundo puerto
+sobre la misma dependencia no aísla nada nuevo y obliga a un adaptador en `cmd` para traducir
+dos structs idénticos. El doble existente registra bucket, clave, nombre y plazo, que es lo que
+hacía falta para verificar «la URL corresponde al archivo pedido» sin firmar de verdad.
 
 La caducidad es una constante del paquete —cinco minutos— y no una variable de entorno. Una URL
 prefirmada es una credencial: su plazo es una decisión de seguridad del producto, no de

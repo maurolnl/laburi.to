@@ -24,19 +24,35 @@ type EmployeeService interface {
 	UpdateAvailability(ctx context.Context, employeeID int32, availabilityRequest CreateEmployeeProfileAvailabilityRequest) error
 	CreateEducation(ctx context.Context, employeeID int32, educationRequest CreateEmployeeEducationRequest, documents []EducationDocumentUpload) error
 	UpdateEducation(ctx context.Context, employeeID int32, educationRequest CreateEmployeeEducationRequest, documents []EducationDocumentUpload) error
+
+	// GetEmployeeProfile, CertificateDownloadURL y EducationDocumentDownloadURL comparten la
+	// misma autorización: quien no puede ver el perfil no puede obtener ninguna URL de sus
+	// archivos. El principal llega entero y no como identificador suelto porque el rol decide
+	// qué regla se aplica.
+	GetEmployeeProfile(ctx context.Context, employeeID int32, principal auth.Principal) (EmployeeProfileResponse, error)
+	CertificateDownloadURL(ctx context.Context, employeeID, fileID int32, principal auth.Principal) (DownloadURLResponse, error)
+	EducationDocumentDownloadURL(ctx context.Context, employeeID, educationID int32, principal auth.Principal) (DownloadURLResponse, error)
 }
 
 type employeeService struct {
 	repo      EmployeeStore
 	uploader  uploader.Service
+	access    RecommendationAccess
 	publisher EmployeeEventPublisher
+	// now existe para que los tests puedan fijar el instante de caducidad de una URL. En
+	// producción es time.Now y nadie la pasa.
+	now func() time.Time
 }
 
-func NewService(repo EmployeeStore, uploader uploader.Service, publisher EmployeeEventPublisher) EmployeeService {
+// NewService recibe el acceso por recomendación como dependencia aparte del store: es la única
+// regla de este paquete que depende de datos que este paquete no posee.
+func NewService(repo EmployeeStore, uploader uploader.Service, access RecommendationAccess, publisher EmployeeEventPublisher) EmployeeService {
 	return &employeeService{
 		repo:      repo,
 		uploader:  uploader,
+		access:    access,
 		publisher: publisher,
+		now:       time.Now,
 	}
 }
 

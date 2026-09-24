@@ -63,8 +63,8 @@ las cinco etapas de carga quedan exactamente como están.
 ## Impact
 
 - **Código nuevo**: `internal/employee/get_employee_profile.go`, `download_url.go`,
-  `authorization.go` y sus tests; el puerto de presignado en `internal/uploader` y su
-  implementación sobre `s3.NewPresignClient`.
+  `authorization.go` y sus tests; el presignado en `internal/uploader` sobre
+  `s3.NewPresignClient`.
 - **Código existente**: `internal/employee/handler.go` (tres rutas nuevas), `store.go` (puertos
   de perfil por identificador, de archivo y de acceso), `repo.go`, `models.go`,
   `internal/recommendation/repo.go` y `store.go`, `cmd/api.go` (cableado del presigner y del

@@ -257,3 +257,65 @@ SELECT (
     AND EXISTS (SELECT 1 FROM employee_profile_availability a WHERE a.employee_id = $1)
     AND EXISTS (SELECT 1 FROM employee_education ed WHERE ed.employee_id = $1)
 )::boolean AS complete;
+
+-- Perfil completo direccionado por el identificador de empleado, para el borde que lo expone a
+-- su dueño y a un empleador con recomendación vigente. Es una consulta aparte de GetEmployee y
+-- no una variante de su WHERE porque no devuelve lo mismo: acá ningún archivo viaja con su
+-- ubicación.
+--
+-- files incluye el identificador de cada certificado y omite los que todavía no terminaron de
+-- subirse, para que la lista coincida exactamente con lo que las rutas de entrega aceptan
+-- servir. education reemplaza el object_key crudo por el identificador con el que se pide la
+-- entrega del documento, nulo cuando el título no tiene ninguno.
+-- name: GetEmployeeProfileByID :one
+SELECT
+    employees.id,
+    employees.position,
+    employees.role,
+    employees.years_of_experience,
+    employees.certifications,
+    employees.portfolio_url,
+    employees.created_at,
+    employees.updated_at,
+    employees.user_id,
+    users.email,
+    employee_location.timezone,
+    employee_profile_tech.os,
+    employee_profile_tech.paid_software,
+    employee_profile_availability.available_hours_per_day,
+    employee_profile_availability.compatible_projects,
+    employee_profile_availability.incompatible_projects,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('type', type, 'speed', speed) ORDER BY id) FROM employee_internet_connections WHERE employee_id = employees.id), '[]'::jsonb)::text AS internet_connections,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('education_type', education_type, 'title', title, 'status', status, 'certification_document_id', CASE WHEN certification IS NOT NULL AND btrim(certification) <> '' THEN id END) ORDER BY id) FROM employee_education WHERE employee_id = employees.id), '[]'::jsonb)::text AS education,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'title', original_filename) ORDER BY id) FROM employee_files WHERE employee_id = employees.id AND status = 'uploaded'), '[]'::jsonb)::text AS files
+FROM employees
+JOIN users ON employees.user_id = users.id
+LEFT JOIN employee_location ON employee_location.employee_id = employees.id
+LEFT JOIN employee_profile_tech ON employee_profile_tech.employee_id = employees.id
+LEFT JOIN employee_profile_availability ON employee_profile_availability.employee_id = employees.id
+WHERE employees.id = $1;
+
+-- Lectura de un certificado por el par empleado/archivo. El filtro por empleado va acá y no en
+-- Go a propósito: un archivo ajeno no devuelve fila, así que es indistinguible de uno
+-- inexistente desde la base y el borde no puede equivocarse al distinguirlos.
+--
+-- El filtro por status descarta el certificado cuyo contenido nunca terminó de subirse: no hay
+-- nada que entregar, y el perfil tampoco lo lista.
+-- name: GetEmployeeFileForEmployee :one
+SELECT bucket, object_key, original_filename, content_type
+FROM employee_files
+WHERE id = $1
+  AND employee_id = $2
+  AND status = 'uploaded';
+
+-- Equivalente para el documento de un título de educación, que no es una fila de
+-- employee_files sino un object_key guardado en la propia fila de educación. El título sin
+-- documento no devuelve fila: a efectos de entrega es lo mismo que un identificador
+-- inexistente.
+-- name: GetEmployeeEducationDocumentForEmployee :one
+SELECT certification, title
+FROM employee_education
+WHERE id = $1
+  AND employee_id = $2
+  AND certification IS NOT NULL
+  AND btrim(certification) <> '';

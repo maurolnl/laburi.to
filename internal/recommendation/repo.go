@@ -35,6 +35,7 @@ type recommendationQueries interface {
 	CountEmployeeRecommendationsForJobPosition(ctx context.Context, batchID int32) (int64, error)
 	GetEmployeeOwner(ctx context.Context, id int32) (int32, error)
 	GetJobPositionOwner(ctx context.Context, id int32) (database.GetJobPositionOwnerRow, error)
+	EmployerHasCurrentRecommendationForEmployee(ctx context.Context, arg database.EmployerHasCurrentRecommendationForEmployeeParams) (bool, error)
 }
 
 type RecommendationRepository struct {
@@ -48,6 +49,7 @@ var (
 	_ RecommendationStore = (*RecommendationRepository)(nil)
 	_ CandidateSource     = (*RecommendationRepository)(nil)
 	_ SubjectOwnership    = (*RecommendationRepository)(nil)
+	_ ProfileAccess       = (*RecommendationRepository)(nil)
 )
 
 func NewRepository(db *sql.DB) *RecommendationRepository {
@@ -356,6 +358,22 @@ func (r *RecommendationRepository) JobPositionOwner(ctx context.Context, jobPosi
 	}
 
 	return JobPositionOwner{EmployerID: row.EmployerID, UserID: row.UserID}, nil
+}
+
+// EmployerHasCurrentRecommendation delega en la consulta que resuelve el vínculo en las dos
+// direcciones. No traduce sql.ErrNoRows porque la consulta siempre devuelve una fila: el
+// booleano ya expresa la ausencia de vínculo, y un empleado inexistente es simplemente un
+// empleado sin vínculo.
+func (r *RecommendationRepository) EmployerHasCurrentRecommendation(ctx context.Context, employeeID, employerUserID int32) (bool, error) {
+	hasAccess, err := r.queries.EmployerHasCurrentRecommendationForEmployee(ctx, database.EmployerHasCurrentRecommendationForEmployeeParams{
+		EmployeeID: employeeID,
+		UserID:     employerUserID,
+	})
+	if err != nil {
+		return false, fmt.Errorf("check current recommendation for employee: %w", err)
+	}
+
+	return hasAccess, nil
 }
 
 func classifyCreateBatchError(err error) error {

@@ -78,8 +78,17 @@ func (app *application) mountFeatureRoutes(mux *http.ServeMux, psqlDB *sql.DB) {
 	validator := validator.New(validator.WithRequiredStructEnabled())
 	recommendationTrigger := app.recommendationTrigger(psqlDB)
 
+	// El repositorio de recomendaciones satisface el puerto con el que internal/employee decide
+	// si un empleador puede ver un perfil ajeno. Entra como dependencia y no como import: el
+	// paquete de perfil sigue sin conocer a recommendation, igual que ya pasa con el disparador
+	// de regeneración.
+	//
+	// Se construye acá y no se reutiliza el de más abajo porque ese vive en el borde de
+	// consulta; compartir la instancia solo acoplaría dos cableados que no tienen por qué
+	// cambiar juntos.
 	employeeRepo := employee.NewRepository(psqlDB)
-	employeeHandler := employee.BuildHandlers(employeeRepo, validator, uploaderService, recommendationTrigger)
+	profileAccess := recommendation.NewRepository(psqlDB)
+	employeeHandler := employee.BuildHandlers(employeeRepo, validator, uploaderService, profileAccess, recommendationTrigger)
 
 	employee.RegisterRoutes(mux, employeeHandler, employeeRepo, app.config.secretKey)
 

@@ -515,6 +515,74 @@ func (q *Queries) GetEmployeeEducation(ctx context.Context, employeeID int32) (E
 	return i, err
 }
 
+const getEmployeeEducationDocumentForEmployee = `-- name: GetEmployeeEducationDocumentForEmployee :one
+SELECT certification, title
+FROM employee_education
+WHERE id = $1
+  AND employee_id = $2
+  AND certification IS NOT NULL
+  AND btrim(certification) <> ''
+`
+
+type GetEmployeeEducationDocumentForEmployeeParams struct {
+	ID         int32
+	EmployeeID int32
+}
+
+type GetEmployeeEducationDocumentForEmployeeRow struct {
+	Certification sql.NullString
+	Title         string
+}
+
+// Equivalente para el documento de un título de educación, que no es una fila de
+// employee_files sino un object_key guardado en la propia fila de educación. El título sin
+// documento no devuelve fila: a efectos de entrega es lo mismo que un identificador
+// inexistente.
+func (q *Queries) GetEmployeeEducationDocumentForEmployee(ctx context.Context, arg GetEmployeeEducationDocumentForEmployeeParams) (GetEmployeeEducationDocumentForEmployeeRow, error) {
+	row := q.db.QueryRowContext(ctx, getEmployeeEducationDocumentForEmployee, arg.ID, arg.EmployeeID)
+	var i GetEmployeeEducationDocumentForEmployeeRow
+	err := row.Scan(&i.Certification, &i.Title)
+	return i, err
+}
+
+const getEmployeeFileForEmployee = `-- name: GetEmployeeFileForEmployee :one
+SELECT bucket, object_key, original_filename, content_type
+FROM employee_files
+WHERE id = $1
+  AND employee_id = $2
+  AND status = 'uploaded'
+`
+
+type GetEmployeeFileForEmployeeParams struct {
+	ID         int32
+	EmployeeID int32
+}
+
+type GetEmployeeFileForEmployeeRow struct {
+	Bucket           string
+	ObjectKey        string
+	OriginalFilename string
+	ContentType      string
+}
+
+// Lectura de un certificado por el par empleado/archivo. El filtro por empleado va acá y no en
+// Go a propósito: un archivo ajeno no devuelve fila, así que es indistinguible de uno
+// inexistente desde la base y el borde no puede equivocarse al distinguirlos.
+//
+// El filtro por status descarta el certificado cuyo contenido nunca terminó de subirse: no hay
+// nada que entregar, y el perfil tampoco lo lista.
+func (q *Queries) GetEmployeeFileForEmployee(ctx context.Context, arg GetEmployeeFileForEmployeeParams) (GetEmployeeFileForEmployeeRow, error) {
+	row := q.db.QueryRowContext(ctx, getEmployeeFileForEmployee, arg.ID, arg.EmployeeID)
+	var i GetEmployeeFileForEmployeeRow
+	err := row.Scan(
+		&i.Bucket,
+		&i.ObjectKey,
+		&i.OriginalFilename,
+		&i.ContentType,
+	)
+	return i, err
+}
+
 const getEmployeeLocation = `-- name: GetEmployeeLocation :many
 SELECT id, employee_id, timezone, created_at, updated_at FROM employee_location WHERE employee_id = $1
 `
@@ -563,6 +631,93 @@ func (q *Queries) GetEmployeeProfileAvailability(ctx context.Context, employeeID
 		&i.IncompatibleProjects,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getEmployeeProfileByID = `-- name: GetEmployeeProfileByID :one
+SELECT
+    employees.id,
+    employees.position,
+    employees.role,
+    employees.years_of_experience,
+    employees.certifications,
+    employees.portfolio_url,
+    employees.created_at,
+    employees.updated_at,
+    employees.user_id,
+    users.email,
+    employee_location.timezone,
+    employee_profile_tech.os,
+    employee_profile_tech.paid_software,
+    employee_profile_availability.available_hours_per_day,
+    employee_profile_availability.compatible_projects,
+    employee_profile_availability.incompatible_projects,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('type', type, 'speed', speed) ORDER BY id) FROM employee_internet_connections WHERE employee_id = employees.id), '[]'::jsonb)::text AS internet_connections,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('education_type', education_type, 'title', title, 'status', status, 'certification_document_id', CASE WHEN certification IS NOT NULL AND btrim(certification) <> '' THEN id END) ORDER BY id) FROM employee_education WHERE employee_id = employees.id), '[]'::jsonb)::text AS education,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'title', original_filename) ORDER BY id) FROM employee_files WHERE employee_id = employees.id AND status = 'uploaded'), '[]'::jsonb)::text AS files
+FROM employees
+JOIN users ON employees.user_id = users.id
+LEFT JOIN employee_location ON employee_location.employee_id = employees.id
+LEFT JOIN employee_profile_tech ON employee_profile_tech.employee_id = employees.id
+LEFT JOIN employee_profile_availability ON employee_profile_availability.employee_id = employees.id
+WHERE employees.id = $1
+`
+
+type GetEmployeeProfileByIDRow struct {
+	ID                   int32
+	Position             string
+	Role                 string
+	YearsOfExperience    string
+	Certifications       []string
+	PortfolioUrl         sql.NullString
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	UserID               int32
+	Email                string
+	Timezone             sql.NullString
+	Os                   sql.NullString
+	PaidSoftware         []string
+	AvailableHoursPerDay sql.NullInt16
+	CompatibleProjects   sql.NullInt16
+	IncompatibleProjects sql.NullInt16
+	InternetConnections  string
+	Education            string
+	Files                string
+}
+
+// Perfil completo direccionado por el identificador de empleado, para el borde que lo expone a
+// su dueño y a un empleador con recomendación vigente. Es una consulta aparte de GetEmployee y
+// no una variante de su WHERE porque no devuelve lo mismo: acá ningún archivo viaja con su
+// ubicación.
+//
+// files incluye el identificador de cada certificado y omite los que todavía no terminaron de
+// subirse, para que la lista coincida exactamente con lo que las rutas de entrega aceptan
+// servir. education reemplaza el object_key crudo por el identificador con el que se pide la
+// entrega del documento, nulo cuando el título no tiene ninguno.
+func (q *Queries) GetEmployeeProfileByID(ctx context.Context, id int32) (GetEmployeeProfileByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getEmployeeProfileByID, id)
+	var i GetEmployeeProfileByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.Position,
+		&i.Role,
+		&i.YearsOfExperience,
+		pq.Array(&i.Certifications),
+		&i.PortfolioUrl,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.UserID,
+		&i.Email,
+		&i.Timezone,
+		&i.Os,
+		pq.Array(&i.PaidSoftware),
+		&i.AvailableHoursPerDay,
+		&i.CompatibleProjects,
+		&i.IncompatibleProjects,
+		&i.InternetConnections,
+		&i.Education,
+		&i.Files,
 	)
 	return i, err
 }

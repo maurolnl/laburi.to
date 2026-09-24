@@ -233,7 +233,7 @@ func TestEmployeeEventPublisherPortIsAlwaysADouble(t *testing.T) {
 	}
 
 	store := &fakeEmployeeStore{profileComplete: true}
-	service := NewService(store, newFakeUploader(), nil).(*employeeService)
+	service := NewService(store, newFakeUploader(), &fakeRecommendationAccess{}, nil).(*employeeService)
 	if err := service.CreateTech(context.Background(), testTriggerEmployeeID, CreateEmployeeTechRequest{}); err != nil {
 		t.Fatalf("CreateTech() with a nil publisher error = %v", err)
 	}

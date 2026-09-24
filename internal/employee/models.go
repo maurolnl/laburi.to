@@ -42,6 +42,86 @@ type (
 		Title string `json:"title"`
 	}
 
+	// ProfileFileItem y ProfileEducationItem son la forma que toman los archivos en el perfil
+	// que se expone por identificador de empleado. Son tipos aparte de FileItem y EducationItem
+	// a propósito: el perfil viejo, direccionado por usuario, sigue devolviendo el object_key
+	// del documento de educación, y unificar los tipos cambiaría ese contrato y rompería al
+	// cliente que hoy lo consume.
+	//
+	// Acá ningún archivo viaja con su ubicación: solo el identificador con el que se pide su
+	// entrega.
+	ProfileFileItem struct {
+		ID    int32  `json:"id"`
+		Title string `json:"title"`
+	}
+
+	// CertificationDocumentID es nulo cuando el título no tiene documento asociado. La ausencia
+	// de documento y un documento con identificador cero son cosas distintas para el cliente,
+	// que decide con este campo si ofrece la descarga.
+	ProfileEducationItem struct {
+		EducationType           string `json:"education_type"`
+		Title                   string `json:"title"`
+		Status                  string `json:"status"`
+		CertificationDocumentID *int32 `json:"certification_document_id"`
+	}
+
+	// EmployeeProfile es el perfil completo leído por identificador de empleado. Repite los
+	// campos de Employee salvo los archivos, que acá van identificados.
+	EmployeeProfile struct {
+		ID                   int32
+		UserID               int32
+		Email                string
+		Position             string
+		Role                 string
+		YearsOfExperience    string
+		Certifications       []string
+		PortfolioURL         string
+		Timezone             string
+		Os                   string
+		PaidSoftware         []string
+		AvailableHoursPerDay int16
+		CompatibleProjects   *int16
+		IncompatibleProjects *int16
+		InternetConnections  []InternetConnection
+		Education            []ProfileEducationItem
+		Files                []ProfileFileItem
+		CreatedAt            time.Time
+		UpdatedAt            time.Time
+	}
+
+	// EmployeeProfileResponse es el cuerpo de GET /employees/{employeeID}. Email es un puntero
+	// con omitempty porque el empleador no lo recibe: una recomendación habilita a evaluar a un
+	// candidato dentro de la plataforma y no a contactarlo por fuera de ella.
+	EmployeeProfileResponse struct {
+		ID                   int32                  `json:"id"`
+		UserID               int32                  `json:"user_id"`
+		Email                *string                `json:"email,omitempty"`
+		Position             string                 `json:"position"`
+		Role                 string                 `json:"role"`
+		YearsOfExperience    string                 `json:"years_of_experience"`
+		Certifications       []string               `json:"certifications"`
+		PortfolioURL         string                 `json:"portfolio_url,omitempty"`
+		Timezone             string                 `json:"timezone"`
+		Os                   string                 `json:"os"`
+		PaidSoftware         []string               `json:"paid_software"`
+		AvailableHoursPerDay int16                  `json:"available_hours_per_day"`
+		CompatibleProjects   *int16                 `json:"compatible_projects"`
+		IncompatibleProjects *int16                 `json:"incompatible_projects"`
+		InternetConnections  []InternetConnection   `json:"internet_connections"`
+		Education            []ProfileEducationItem `json:"education"`
+		Files                []ProfileFileItem      `json:"files"`
+		CreatedAt            time.Time              `json:"created_at"`
+		UpdatedAt            time.Time              `json:"updated_at"`
+	}
+
+	// DownloadURLResponse es el cuerpo de las dos rutas de entrega. No lleva bucket ni clave de
+	// objeto: la URL ya es el único acceso, y ExpiresAt le dice al cliente cuánto le dura sin
+	// tener que descubrirlo con un fallo.
+	DownloadURLResponse struct {
+		URL       string    `json:"url"`
+		ExpiresAt time.Time `json:"expires_at"`
+	}
+
 	Employee struct {
 		ID                   int32
 		UserID               int32
