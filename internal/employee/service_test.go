@@ -28,6 +28,17 @@ func newTestService(t *testing.T) (*employeeService, *fakeEmployeeStore, *fakeUp
 	return service, store, upl
 }
 
+// newTestProfileService arma el servicio con los dobles que necesitan las lecturas por
+// identificador de empleado: el store, el uploader que registra las firmas y el acceso por
+// recomendación.
+func newTestProfileService(t *testing.T) (*employeeService, *fakeEmployeeStore, *fakeUploader, *fakeRecommendationAccess) {
+	t.Helper()
+	store := &fakeEmployeeStore{}
+	upl := newFakeUploader()
+	access := &fakeRecommendationAccess{}
+	return NewService(store, upl, access, &fakeEmployeePublisher{}).(*employeeService), store, upl, access
+}
+
 // newTestServiceWithPublisher arma el servicio con el doble del puerto de recomendaciones, para
 // los tests que además afirman qué se notificó.
 func newTestServiceWithPublisher(t *testing.T) (*employeeService, *fakeEmployeeStore, *fakeUploader, *fakeEmployeePublisher) {
@@ -35,7 +46,7 @@ func newTestServiceWithPublisher(t *testing.T) (*employeeService, *fakeEmployeeS
 	store := &fakeEmployeeStore{}
 	upl := newFakeUploader()
 	publisher := &fakeEmployeePublisher{}
-	return NewService(store, upl, publisher).(*employeeService), store, upl, publisher
+	return NewService(store, upl, &fakeRecommendationAccess{}, publisher).(*employeeService), store, upl, publisher
 }
 
 func TestCreateEmployeeUploadMetadata(t *testing.T) {

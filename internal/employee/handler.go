@@ -29,8 +29,8 @@ func NewHandler(service EmployeeService, validate *validator.Validate) *Employee
 	}
 }
 
-func BuildHandlers(store EmployeeStore, validate *validator.Validate, uploader uploader.Service, publisher EmployeeEventPublisher) *EmployeeHandler {
-	employeeService := NewService(store, uploader, publisher)
+func BuildHandlers(store EmployeeStore, validate *validator.Validate, uploader uploader.Service, access RecommendationAccess, publisher EmployeeEventPublisher) *EmployeeHandler {
+	employeeService := NewService(store, uploader, access, publisher)
 	employeeHandler := NewHandler(employeeService, validate)
 
 	return employeeHandler
@@ -55,4 +55,13 @@ func RegisterRoutes(mux *http.ServeMux, h *EmployeeHandler, repo *EmployeeReposi
 	mux.Handle("POST /employees/{employeeID}/education", employeeMiddlware(http.HandlerFunc(h.CreateEducation)))
 	mux.Handle("PUT /employees/{employeeID}/education", employeeMiddlware(http.HandlerFunc(h.UpdateEducation)))
 	mux.Handle("GET /users/{userID}/employee", authMiddleware(http.HandlerFunc(h.GetEmployee)))
+
+	// Las tres rutas de lectura por identificador de empleado van detrás de authMiddleware y no
+	// de employeeMiddlware. El middleware de propiedad responde 403 a todo el que no sea el
+	// dueño, que es exactamente el actor que estas rutas habilitan: un empleador con
+	// recomendación vigente. La autorización vive en el servicio, que es el único lugar donde
+	// se puede resolver junto con esa condición.
+	mux.Handle("GET /employees/{employeeID}", authMiddleware(http.HandlerFunc(h.GetEmployeeProfile)))
+	mux.Handle("GET /employees/{employeeID}/files/{fileID}/download-url", authMiddleware(http.HandlerFunc(h.CertificateDownloadURL)))
+	mux.Handle("GET /employees/{employeeID}/education-documents/{educationID}/download-url", authMiddleware(http.HandlerFunc(h.EducationDocumentDownloadURL)))
 }

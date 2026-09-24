@@ -159,6 +159,71 @@ func (q *Queries) EmployeeExists(ctx context.Context, id int32) (bool, error) {
 	return exists, err
 }
 
+const employerHasCurrentRecommendationForEmployee = `-- name: EmployerHasCurrentRecommendationForEmployee :one
+SELECT (
+    EXISTS (
+        SELECT 1
+        FROM recommendations r
+        JOIN job_positions j ON j.id = r.job_position_id
+        JOIN employers emp ON emp.id = j.employer_id
+        WHERE r.employee_id = $1
+          AND emp.user_id = $2
+          AND j.deleted_at IS NULL
+          AND r.batch_id = (
+              SELECT b.id
+              FROM recommendation_batches b
+              WHERE b.employee_id = $1
+                AND b.status = 'completed'
+              ORDER BY b.created_at DESC, b.id DESC
+              LIMIT 1
+          )
+    )
+    OR
+    EXISTS (
+        SELECT 1
+        FROM recommendations r
+        JOIN job_positions j ON j.id = r.job_position_id
+        JOIN employers emp ON emp.id = j.employer_id
+        WHERE r.employee_id = $1
+          AND emp.user_id = $2
+          AND j.deleted_at IS NULL
+          AND r.batch_id = (
+              SELECT b.id
+              FROM recommendation_batches b
+              WHERE b.job_position_id = j.id
+                AND b.status = 'completed'
+              ORDER BY b.created_at DESC, b.id DESC
+              LIMIT 1
+          )
+    )
+)::boolean AS has_access
+`
+
+type EmployerHasCurrentRecommendationForEmployeeParams struct {
+	EmployeeID int32
+	UserID     int32
+}
+
+// Condición de acceso de un empleador al perfil de un empleado. Responde por sí o por no y no
+// proyecta ninguna fila: quien pregunta solo necesita autorizar, y devolverle el conjunto lo
+// obligaría a recorrerlo para llegar a la misma respuesta.
+//
+// El vínculo vale en las dos direcciones, y cada una se resuelve contra el último batch
+// completado de su propio sujeto. Son dos EXISTS independientes y no un único EXISTS con los
+// dos batches en un IN: ese IN necesitaría correlacionar una subconsulta de FROM con el
+// job_position_id de la fila externa, que en Postgres exige LATERAL. Dos EXISTS evitan esa
+// complicación y se leen como las dos reglas que son.
+//
+// La vigencia usa exactamente la misma definición que los listados —último batch 'completed' y
+// puestos con deleted_at IS NULL—, así que el acceso no puede habilitar un perfil que el
+// listado de candidatos ya no muestra.
+func (q *Queries) EmployerHasCurrentRecommendationForEmployee(ctx context.Context, arg EmployerHasCurrentRecommendationForEmployeeParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, employerHasCurrentRecommendationForEmployee, arg.EmployeeID, arg.UserID)
+	var has_access bool
+	err := row.Scan(&has_access)
+	return has_access, err
+}
+
 const getActiveJobPositionRequirements = `-- name: GetActiveJobPositionRequirements :one
 SELECT id AS job_position_id,
        required_experience,

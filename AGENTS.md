@@ -98,6 +98,10 @@ Autenticadas con `AuthenticatedUser` (JWT):
 - `GET /timezones` → `200`
 - `POST /employees` → `201`
 - `GET /users/{userID}/employee` → `200`
+- `GET /employees/{employeeID}` → `200` con el perfil completo; lo lee su dueño o un employer
+  con recomendación vigente. Nunca devuelve bucket ni object key
+- `GET /employees/{employeeID}/files/{fileID}/download-url` → `200` con `{url, expires_at}`
+- `GET /employees/{employeeID}/education-documents/{educationID}/download-url` → `200` ídem
 - `POST /employers` → `201`
 - `GET /users/{userID}/employer` → `200`
 - `POST /employers/{employerID}/jobs` → `201` con el puesto publicado
@@ -105,6 +109,16 @@ Autenticadas con `AuthenticatedUser` (JWT):
 - `GET /jobs/{jobPositionID}` → `200`
 - `PUT /jobs/{jobPositionID}` → `200`
 - `DELETE /jobs/{jobPositionID}` → `204` sin cuerpo (soft delete, sin reapertura)
+
+Las tres rutas de lectura por `employeeID` van detrás de `AuthenticatedUser` y **no** del
+middleware de propiedad: el middleware responde `403` a todo el que no sea el dueño, que es
+justamente el actor que habilitan. Su autorización vive en el servicio de `internal/employee`,
+que recibe la condición de acceso por el puerto `RecommendationAccess` sin importar
+`internal/recommendation`. Toda falla de autorización es `403` con un mensaje único —perfil
+ajeno, employer sin vínculo y empleado inexistente son indistinguibles—; el `404` queda para un
+archivo que no pertenece al empleado ya autorizado. Las URLs prefirmadas duran 5 minutos
+(constante `presignTTL`, no configurable por entorno) y su revocación es lógica: perder el
+vínculo corta la emisión siguiente, no invalida una URL ya emitida.
 
 Autenticadas con `AuthenticatedEmployeeMiddleWare` (JWT + propiedad del recurso):
 

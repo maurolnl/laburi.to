@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"strings"
 
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/database"
 )
@@ -165,6 +167,9 @@ func (r *EmployeeRepository) IsProfileComplete(ctx context.Context, employeeID i
 func (r *EmployeeRepository) GetEmployeeByID(ctx context.Context, ID int32) (Employee, error) {
 	q := database.New(r.db)
 	row, err := q.GetEmployeeByID(ctx, ID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Employee{}, ErrEmployeeProfileNotFound
+	}
 	if err != nil {
 		return Employee{}, err
 	}
@@ -261,4 +266,122 @@ func validateTimezone(ctx context.Context, db database.DBTX, timezone string) er
 	}
 
 	return nil
+}
+
+// GetEmployeeProfileByID lee el perfil por el identificador de empleado. Comparte con
+// GetEmployee la forma de la fila salvo en los dos agregados de archivos, así que la
+// deserialización común vive en unmarshalProfileArrays y el mapeo no se duplica.
+func (r *EmployeeRepository) GetEmployeeProfileByID(ctx context.Context, employeeID int32) (EmployeeProfile, error) {
+	q := database.New(r.db)
+	row, err := q.GetEmployeeProfileByID(ctx, employeeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return EmployeeProfile{}, ErrEmployeeProfileNotFound
+	}
+	if err != nil {
+		return EmployeeProfile{}, err
+	}
+
+	var internetConnections []InternetConnection
+	if err := json.Unmarshal([]byte(row.InternetConnections), &internetConnections); err != nil {
+		return EmployeeProfile{}, err
+	}
+
+	var education []ProfileEducationItem
+	if err := json.Unmarshal([]byte(row.Education), &education); err != nil {
+		return EmployeeProfile{}, err
+	}
+
+	var files []ProfileFileItem
+	if err := json.Unmarshal([]byte(row.Files), &files); err != nil {
+		return EmployeeProfile{}, err
+	}
+
+	return EmployeeProfile{
+		ID:                   row.ID,
+		UserID:               row.UserID,
+		Email:                row.Email,
+		Position:             row.Position,
+		Role:                 row.Role,
+		YearsOfExperience:    row.YearsOfExperience,
+		Certifications:       row.Certifications,
+		PortfolioURL:         row.PortfolioUrl.String,
+		Timezone:             row.Timezone.String,
+		Os:                   row.Os.String,
+		PaidSoftware:         row.PaidSoftware,
+		AvailableHoursPerDay: row.AvailableHoursPerDay.Int16,
+		CompatibleProjects:   nullInt16ToPtr(row.CompatibleProjects),
+		IncompatibleProjects: nullInt16ToPtr(row.IncompatibleProjects),
+		InternetConnections:  internetConnections,
+		Education:            education,
+		Files:                files,
+		CreatedAt:            row.CreatedAt,
+		UpdatedAt:            row.UpdatedAt,
+	}, nil
+}
+
+// GetEmployeeFile y GetEmployeeEducationDocument filtran por el par empleado/identificador en
+// la consulta y no acá: un archivo ajeno no devuelve fila, así que la traducción a
+// ErrFileNotFound es la misma que la del archivo inexistente sin que este código tenga que
+// acordarse de igualarlas.
+func (r *EmployeeRepository) GetEmployeeFile(ctx context.Context, employeeID, fileID int32) (StoredFile, error) {
+	q := database.New(r.db)
+	row, err := q.GetEmployeeFileForEmployee(ctx, database.GetEmployeeFileForEmployeeParams{
+		ID:         fileID,
+		EmployeeID: employeeID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return StoredFile{}, ErrFileNotFound
+	}
+	if err != nil {
+		return StoredFile{}, err
+	}
+
+	return StoredFile{
+		Bucket:      row.Bucket,
+		ObjectKey:   row.ObjectKey,
+		Filename:    row.OriginalFilename,
+		ContentType: row.ContentType,
+	}, nil
+}
+
+// El documento de un título no es una fila de employee_files sino un object_key guardado en la
+// propia fila de educación, así que no hay bucket ni content type persistidos. El bucket lo
+// aporta quien firma, que es el único que conoce la configuración, y el content type es siempre
+// PDF por la validación de carga.
+func (r *EmployeeRepository) GetEmployeeEducationDocument(ctx context.Context, employeeID, educationID int32) (StoredFile, error) {
+	q := database.New(r.db)
+	row, err := q.GetEmployeeEducationDocumentForEmployee(ctx, database.GetEmployeeEducationDocumentForEmployeeParams{
+		ID:         educationID,
+		EmployeeID: employeeID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return StoredFile{}, ErrFileNotFound
+	}
+	if err != nil {
+		return StoredFile{}, err
+	}
+
+	return StoredFile{
+		ObjectKey:   row.Certification.String,
+		Filename:    educationDocumentFilename(row.Title),
+		ContentType: educationDocumentContentType,
+	}, nil
+}
+
+// educationDocumentFilename arma el nombre con el que el navegador guarda el documento. El
+// nombre original no se persistió al subirlo, así que se deriva del título del estudio, que es
+// lo único que identifica al documento para quien lo descarga.
+func educationDocumentFilename(title string) string {
+	sanitized := strings.Map(func(r rune) rune {
+		if r == '"' || r == '\\' || r == '/' || r < ' ' {
+			return '-'
+		}
+		return r
+	}, strings.TrimSpace(title))
+
+	if sanitized == "" {
+		sanitized = "documento"
+	}
+
+	return sanitized + ".pdf"
 }

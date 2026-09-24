@@ -25,6 +25,14 @@ type fakeEmployeeService struct {
 	getEmployeeErr   error
 	getEmployeeCalls int
 
+	profileData  EmployeeProfileResponse
+	profileErr   error
+	profileCalls []int32
+
+	downloadData  DownloadURLResponse
+	downloadErr   error
+	downloadCalls []storeFileCall
+
 	createLocationCalls []locationCall
 	createLocationErr   error
 	updateLocationCalls []locationCall
@@ -129,6 +137,31 @@ func (f *fakeEmployeeService) GetEmployee(ctx context.Context, ID int32) (Employ
 	return f.getEmployeeData, f.getEmployeeErr
 }
 
+// Los tres métodos de lectura por identificador existen para satisfacer la interfaz. Los tests
+// de esas rutas no usan este doble: arman el handler sobre el servicio real con store, uploader
+// y acceso falsos, porque lo que verifican es justamente la autorización y el presignado, que
+// viven en el servicio.
+func (f *fakeEmployeeService) GetEmployeeProfile(_ context.Context, employeeID int32, _ auth.Principal) (EmployeeProfileResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.profileCalls = append(f.profileCalls, employeeID)
+	return f.profileData, f.profileErr
+}
+
+func (f *fakeEmployeeService) CertificateDownloadURL(_ context.Context, employeeID, fileID int32, _ auth.Principal) (DownloadURLResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.downloadCalls = append(f.downloadCalls, storeFileCall{EmployeeID: employeeID, FileID: fileID})
+	return f.downloadData, f.downloadErr
+}
+
+func (f *fakeEmployeeService) EducationDocumentDownloadURL(_ context.Context, employeeID, educationID int32, _ auth.Principal) (DownloadURLResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.downloadCalls = append(f.downloadCalls, storeFileCall{EmployeeID: employeeID, FileID: educationID})
+	return f.downloadData, f.downloadErr
+}
+
 func (f *fakeEmployeeService) CreateLocation(ctx context.Context, employeeID int32, locationRequest CreateEmployeeLocationRequest) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -214,6 +247,32 @@ type fakeEmployeeStore struct {
 	profileComplete      bool
 	profileCompleteErr   error
 	profileCompleteCalls []int32
+
+	// El perfil por identificador, el certificado y el documento de título se configuran por
+	// separado porque los tests de autorización y los de entrega miran cosas distintas: unos,
+	// que la lectura ni siquiera ocurra; otros, qué archivo se firmó.
+	ownerData  Employee
+	ownerErr   error
+	ownerCalls []int32
+
+	profileData  EmployeeProfile
+	profileErr   error
+	profileCalls []int32
+
+	fileData  StoredFile
+	fileErr   error
+	fileCalls []storeFileCall
+
+	educationDocumentData  StoredFile
+	educationDocumentErr   error
+	educationDocumentCalls []storeFileCall
+}
+
+// storeFileCall registra el par con el que se pidió un archivo. El par completo importa: el
+// filtro por empleado es lo que impide entregar el archivo de otro.
+type storeFileCall struct {
+	EmployeeID int32
+	FileID     int32
 }
 
 type storeCreateEmployeeCall struct {
@@ -311,6 +370,37 @@ func (f *fakeEmployeeStore) GetEmployee(ctx context.Context, ID int32) (Employee
 	return f.getEmployeeData, f.getEmployeeErr
 }
 
+// GetEmployeeByID es la lectura mínima con la que el servicio resuelve la propiedad. El doble
+// la separa del perfil completo a propósito: los tests de autorización comprueban que la
+// decisión se toma con esta y no leyendo el perfil entero de alguien ajeno.
+func (f *fakeEmployeeStore) GetEmployeeByID(_ context.Context, employeeID int32) (Employee, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ownerCalls = append(f.ownerCalls, employeeID)
+	return f.ownerData, f.ownerErr
+}
+
+func (f *fakeEmployeeStore) GetEmployeeProfileByID(_ context.Context, employeeID int32) (EmployeeProfile, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.profileCalls = append(f.profileCalls, employeeID)
+	return f.profileData, f.profileErr
+}
+
+func (f *fakeEmployeeStore) GetEmployeeFile(_ context.Context, employeeID, fileID int32) (StoredFile, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.fileCalls = append(f.fileCalls, storeFileCall{EmployeeID: employeeID, FileID: fileID})
+	return f.fileData, f.fileErr
+}
+
+func (f *fakeEmployeeStore) GetEmployeeEducationDocument(_ context.Context, employeeID, educationID int32) (StoredFile, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.educationDocumentCalls = append(f.educationDocumentCalls, storeFileCall{EmployeeID: employeeID, FileID: educationID})
+	return f.educationDocumentData, f.educationDocumentErr
+}
+
 type fakeUploader struct {
 	mu sync.Mutex
 
@@ -320,6 +410,9 @@ type fakeUploader struct {
 
 	deleteCalls chan deleteCall
 	deleteErr   error
+
+	presignCalls []uploader.PresignInput
+	presignErr   error
 }
 
 type deleteCall struct {
@@ -351,6 +444,51 @@ func (f *fakeUploader) Upload(ctx context.Context, input uploader.UploadInput) (
 func (f *fakeUploader) Delete(ctx context.Context, bucket, key string) error {
 	f.deleteCalls <- deleteCall{Bucket: bucket, Key: key}
 	return f.deleteErr
+}
+
+// PresignGetObject registra con qué bucket, clave, nombre y plazo se firmó, y devuelve una URL
+// determinística derivada de la clave. Es lo que permite verificar «la URL corresponde al
+// archivo pedido» y «el plazo es el declarado» sin firmar de verdad ni abrir red.
+func (f *fakeUploader) PresignGetObject(_ context.Context, input uploader.PresignInput) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.presignCalls = append(f.presignCalls, input)
+	if f.presignErr != nil {
+		return "", f.presignErr
+	}
+	return "https://s3.test/signed/" + input.Key, nil
+}
+
+func (f *fakeUploader) lastPresign() uploader.PresignInput {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.presignCalls) == 0 {
+		return uploader.PresignInput{}
+	}
+	return f.presignCalls[len(f.presignCalls)-1]
+}
+
+// fakeRecommendationAccess es el doble del puerto que decide si un empleador puede mirar un
+// perfil ajeno. Registra el par consultado para que los tests puedan comprobar que la
+// autorización preguntó por el principal del JWT y no por un identificador del path.
+type fakeRecommendationAccess struct {
+	mu sync.Mutex
+
+	allowed bool
+	err     error
+	calls   []accessCall
+}
+
+type accessCall struct {
+	EmployeeID     int32
+	EmployerUserID int32
+}
+
+func (f *fakeRecommendationAccess) EmployerHasCurrentRecommendation(_ context.Context, employeeID, employerUserID int32) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, accessCall{EmployeeID: employeeID, EmployerUserID: employerUserID})
+	return f.allowed, f.err
 }
 
 // fakeEmployeePublisher es el doble del puerto de recomendaciones. Toda la suite lo usa en
