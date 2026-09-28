@@ -4,6 +4,7 @@
     "buildCommand": "make build-railway"
   },
   "deploy": {
+    "preDeployCommand": ["./out migrate"],
     "startCommand": "./out"
   }
 }

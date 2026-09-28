@@ -14,6 +14,14 @@ import (
 
 func main() {
 	loadEnv()
+
+	if len(os.Args) > 1 && os.Args[1] == migrateCommand {
+		if err := runMigrations(); err != nil {
+			logErrorAndFail(err)
+		}
+		return
+	}
+
 	port := getPort()
 
 	secretKey := os.Getenv("SECRET_KEY")
