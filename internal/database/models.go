@@ -33,19 +33,20 @@ type EmployeeEducation struct {
 }
 
 type EmployeeFile struct {
-	ID               int32
-	EmployeeID       int32
-	Type             string
-	Bucket           string
-	ObjectKey        string
-	OriginalFilename string
-	ContentType      string
-	SizeBytes        int64
-	ChecksumSha256   sql.NullString
-	Status           string
-	CreatedAt        time.Time
-	UploadedAt       sql.NullTime
-	UpdatedAt        time.Time
+	ID                int32
+	EmployeeID        int32
+	Type              string
+	Bucket            string
+	ObjectKey         string
+	OriginalFilename  string
+	ContentType       string
+	SizeBytes         int64
+	ChecksumSha256    sql.NullString
+	Status            string
+	CreatedAt         time.Time
+	UploadedAt        sql.NullTime
+	UpdatedAt         time.Time
+	CertificationName sql.NullString
 }
 
 type EmployeeInternetConnection struct {

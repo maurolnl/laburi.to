@@ -54,15 +54,19 @@ func getWithToken(t *testing.T, mux *http.ServeMux, path, token string) *httptes
 
 func profileFixture() EmployeeProfile {
 	documentID := int32(77)
+	certificateID := int32(55)
 
 	return EmployeeProfile{
-		ID:                   42,
-		UserID:               7,
-		Email:                "empleado@laburi.to",
-		Position:             "Backend Developer",
-		Role:                 "Individual Contributor",
-		YearsOfExperience:    "2_to_5y",
-		Certifications:       []string{"AWS"},
+		ID:                42,
+		UserID:            7,
+		Email:             "empleado@laburi.to",
+		Position:          "Backend Developer",
+		Role:              "Individual Contributor",
+		YearsOfExperience: "2_to_5y",
+		Certifications: []CertificationResponseItem{
+			{Name: "AWS", DocumentID: &certificateID},
+			{Name: "ITIL"},
+		},
 		Timezone:             "America/Argentina/Buenos_Aires",
 		Os:                   "linux",
 		PaidSoftware:         []string{"JetBrains"},
@@ -218,6 +222,18 @@ func TestGetEmployeeProfileCuerpo(t *testing.T) {
 
 		if len(response.Files) != 1 || response.Files[0].ID != 11 || response.Files[0].Title != "certificado.pdf" {
 			t.Fatalf("archivos inesperados: %+v", response.Files)
+		}
+		// Cada certificación trae el identificador de su PDF, y la que no tiene lo trae nulo
+		// en vez de omitirlo: el cliente decide con este campo si ofrece la descarga.
+		if len(response.Certifications) != 2 || response.Certifications[0].Name != "AWS" ||
+			response.Certifications[0].DocumentID == nil || *response.Certifications[0].DocumentID != 55 {
+			t.Fatalf("certificaciones inesperadas: %+v", response.Certifications)
+		}
+		if response.Certifications[1].DocumentID != nil {
+			t.Fatalf("la certificación sin PDF trae identificador: %+v", response.Certifications[1])
+		}
+		if !strings.Contains(recorder.Body.String(), `{"name":"ITIL","document_id":null}`) {
+			t.Fatalf("la certificación sin PDF no viaja con document_id nulo: %s", recorder.Body.String())
 		}
 		if len(response.Education) != 2 {
 			t.Fatalf("educación inesperada: %+v", response.Education)

@@ -38,8 +38,12 @@ type (
 		Certification *string `json:"certification,omitempty"`
 	}
 
-	FileItem struct {
-		Title string `json:"title"`
+	// CertificationResponseItem es una certificación leída del perfil. DocumentID es el
+	// identificador de su certificado activo, nulo cuando no tiene: la ausencia de PDF y un PDF
+	// con identificador cero son cosas distintas para el cliente.
+	CertificationResponseItem struct {
+		Name       string `json:"name"`
+		DocumentID *int32 `json:"document_id"`
 	}
 
 	// ProfileFileItem y ProfileEducationItem son la forma que toman los archivos en el perfil
@@ -49,7 +53,8 @@ type (
 	// cliente que hoy lo consume.
 	//
 	// Acá ningún archivo viaja con su ubicación: solo el identificador con el que se pide su
-	// entrega.
+	// entrega. En las dos lecturas del perfil, files lista solo los certificados sin
+	// certificación asociada, cargados antes de que cada PDF quedara vinculado a la suya.
 	ProfileFileItem struct {
 		ID    int32  `json:"id"`
 		Title string `json:"title"`
@@ -74,7 +79,7 @@ type (
 		Position             string
 		Role                 string
 		YearsOfExperience    string
-		Certifications       []string
+		Certifications       []CertificationResponseItem
 		PortfolioURL         string
 		Timezone             string
 		Os                   string
@@ -93,25 +98,25 @@ type (
 	// con omitempty porque el empleador no lo recibe: una recomendación habilita a evaluar a un
 	// candidato dentro de la plataforma y no a contactarlo por fuera de ella.
 	EmployeeProfileResponse struct {
-		ID                   int32                  `json:"id"`
-		UserID               int32                  `json:"user_id"`
-		Email                *string                `json:"email,omitempty"`
-		Position             string                 `json:"position"`
-		Role                 string                 `json:"role"`
-		YearsOfExperience    string                 `json:"years_of_experience"`
-		Certifications       []string               `json:"certifications"`
-		PortfolioURL         string                 `json:"portfolio_url,omitempty"`
-		Timezone             string                 `json:"timezone"`
-		Os                   string                 `json:"os"`
-		PaidSoftware         []string               `json:"paid_software"`
-		AvailableHoursPerDay int16                  `json:"available_hours_per_day"`
-		CompatibleProjects   *int16                 `json:"compatible_projects"`
-		IncompatibleProjects *int16                 `json:"incompatible_projects"`
-		InternetConnections  []InternetConnection   `json:"internet_connections"`
-		Education            []ProfileEducationItem `json:"education"`
-		Files                []ProfileFileItem      `json:"files"`
-		CreatedAt            time.Time              `json:"created_at"`
-		UpdatedAt            time.Time              `json:"updated_at"`
+		ID                   int32                       `json:"id"`
+		UserID               int32                       `json:"user_id"`
+		Email                *string                     `json:"email,omitempty"`
+		Position             string                      `json:"position"`
+		Role                 string                      `json:"role"`
+		YearsOfExperience    string                      `json:"years_of_experience"`
+		Certifications       []CertificationResponseItem `json:"certifications"`
+		PortfolioURL         string                      `json:"portfolio_url,omitempty"`
+		Timezone             string                      `json:"timezone"`
+		Os                   string                      `json:"os"`
+		PaidSoftware         []string                    `json:"paid_software"`
+		AvailableHoursPerDay int16                       `json:"available_hours_per_day"`
+		CompatibleProjects   *int16                      `json:"compatible_projects"`
+		IncompatibleProjects *int16                      `json:"incompatible_projects"`
+		InternetConnections  []InternetConnection        `json:"internet_connections"`
+		Education            []ProfileEducationItem      `json:"education"`
+		Files                []ProfileFileItem           `json:"files"`
+		CreatedAt            time.Time                   `json:"created_at"`
+		UpdatedAt            time.Time                   `json:"updated_at"`
 	}
 
 	// DownloadURLResponse es el cuerpo de las dos rutas de entrega. No lleva bucket ni clave de
@@ -129,7 +134,7 @@ type (
 		Position             string
 		Role                 string
 		YearsOfExperience    string
-		Certifications       []string
+		Certifications       []CertificationResponseItem
 		PortfolioURL         string
 		Timezone             string
 		Os                   string
@@ -139,31 +144,31 @@ type (
 		IncompatibleProjects *int16
 		InternetConnections  []InternetConnection
 		Education            []EducationItem
-		Files                []FileItem
+		Files                []ProfileFileItem
 		CreatedAt            time.Time
 		UpdatedAt            time.Time
 	}
 
 	GetEmployeeResponse struct {
-		ID                   int32                `json:"id"`
-		UserID               int32                `json:"user_id"`
-		Email                string               `json:"email"`
-		Position             string               `json:"position"`
-		Role                 string               `json:"role"`
-		YearsOfExperience    string               `json:"years_of_experience"`
-		Certifications       []string             `json:"certifications"`
-		PortfolioURL         string               `json:"portfolio_url,omitempty"`
-		Timezone             string               `json:"timezone"`
-		Os                   string               `json:"os"`
-		PaidSoftware         []string             `json:"paid_software"`
-		AvailableHoursPerDay int16                `json:"available_hours_per_day"`
-		CompatibleProjects   *int16               `json:"compatible_projects"`
-		IncompatibleProjects *int16               `json:"incompatible_projects"`
-		InternetConnections  []InternetConnection `json:"internet_connections"`
-		Education            []EducationItem      `json:"education"`
-		Files                []FileItem           `json:"files"`
-		CreatedAt            time.Time            `json:"created_at"`
-		UpdatedAt            time.Time            `json:"updated_at"`
+		ID                   int32                       `json:"id"`
+		UserID               int32                       `json:"user_id"`
+		Email                string                      `json:"email"`
+		Position             string                      `json:"position"`
+		Role                 string                      `json:"role"`
+		YearsOfExperience    string                      `json:"years_of_experience"`
+		Certifications       []CertificationResponseItem `json:"certifications"`
+		PortfolioURL         string                      `json:"portfolio_url,omitempty"`
+		Timezone             string                      `json:"timezone"`
+		Os                   string                      `json:"os"`
+		PaidSoftware         []string                    `json:"paid_software"`
+		AvailableHoursPerDay int16                       `json:"available_hours_per_day"`
+		CompatibleProjects   *int16                      `json:"compatible_projects"`
+		IncompatibleProjects *int16                      `json:"incompatible_projects"`
+		InternetConnections  []InternetConnection        `json:"internet_connections"`
+		Education            []EducationItem             `json:"education"`
+		Files                []ProfileFileItem           `json:"files"`
+		CreatedAt            time.Time                   `json:"created_at"`
+		UpdatedAt            time.Time                   `json:"updated_at"`
 	}
 
 	Timezone struct {
@@ -209,8 +214,10 @@ type (
 	// Step 4
 	BaseEmployeeProfileAvailability struct {
 		AvailableHoursPerDay int `json:"available_hours_per_day" validate:"required,min=1,max=8"`
-		CompatibleProjects   int `json:"compatible_projects" validate:"min=0,max=32767"`
-		IncompatibleProjects int `json:"incompatible_projects" validate:"min=0,max=32767"`
+		// Punteros para distinguir el campo omitido, que se persiste como NULL, del cero
+		// informado explícitamente. El FE omite el campo cuando el usuario no lo completa.
+		CompatibleProjects   *int `json:"compatible_projects" validate:"omitempty,min=0,max=32767"`
+		IncompatibleProjects *int `json:"incompatible_projects" validate:"omitempty,min=0,max=32767"`
 	}
 
 	CreateEmployeeProfileAvailabilityRequest struct {

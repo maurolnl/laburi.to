@@ -97,8 +97,8 @@ func (r *EmployeeRepository) CreateAvailability(ctx context.Context, employeeID 
 	_, err := q.CreateEmployeeProfileAvailability(ctx, database.CreateEmployeeProfileAvailabilityParams{
 		EmployeeID:           employeeID,
 		AvailableHoursPerDay: int16(availabilityRequest.AvailableHoursPerDay),
-		CompatibleProjects:   intToNullInt16(availabilityRequest.CompatibleProjects, availabilityRequest.CompatibleProjects != 0),
-		IncompatibleProjects: intToNullInt16(availabilityRequest.IncompatibleProjects, availabilityRequest.IncompatibleProjects != 0),
+		CompatibleProjects:   intToNullInt16(availabilityRequest.CompatibleProjects),
+		IncompatibleProjects: intToNullInt16(availabilityRequest.IncompatibleProjects),
 	})
 
 	return err
@@ -109,24 +109,24 @@ func (r *EmployeeRepository) UpdateAvailability(ctx context.Context, employeeID 
 	_, err := q.UpsertEmployeeProfileAvailability(ctx, database.UpsertEmployeeProfileAvailabilityParams{
 		EmployeeID:           employeeID,
 		AvailableHoursPerDay: int16(availabilityRequest.AvailableHoursPerDay),
-		CompatibleProjects:   intToNullInt16(availabilityRequest.CompatibleProjects, availabilityRequest.CompatibleProjects != 0),
-		IncompatibleProjects: intToNullInt16(availabilityRequest.IncompatibleProjects, availabilityRequest.IncompatibleProjects != 0),
+		CompatibleProjects:   intToNullInt16(availabilityRequest.CompatibleProjects),
+		IncompatibleProjects: intToNullInt16(availabilityRequest.IncompatibleProjects),
 	})
 
 	return err
 }
 
-func intToNullInt16(value int, valid bool) sql.NullInt16 {
-	if !valid {
+func intToNullInt16(value *int) sql.NullInt16 {
+	if value == nil {
 		return sql.NullInt16{}
 	}
 
-	if value < math.MinInt16 || value > math.MaxInt16 {
+	if *value < math.MinInt16 || *value > math.MaxInt16 {
 		return sql.NullInt16{}
 	}
 
 	return sql.NullInt16{
-		Int16: int16(value),
+		Int16: int16(*value),
 		Valid: true,
 	}
 }

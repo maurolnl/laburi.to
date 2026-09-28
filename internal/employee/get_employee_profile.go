@@ -55,7 +55,7 @@ func (s *employeeService) GetEmployeeProfile(ctx context.Context, employeeID int
 	return profileResponse(profile, viewer), nil
 }
 
-// profileResponse arma el cuerpo. Las tres listas nunca viajan nulas: un arreglo vacío y null
+// profileResponse arma el cuerpo. Las listas nunca viajan nulas: un arreglo vacío y null
 // son cosas distintas para el cliente, y el perfil a medio completar es el caso más común.
 //
 // El correo solo se incluye para el dueño. La omisión se hace acá, en el único lugar por el que
@@ -84,7 +84,7 @@ func profileResponse(profile EmployeeProfile, viewer profileViewer) EmployeeProf
 	}
 
 	if response.Certifications == nil {
-		response.Certifications = []string{}
+		response.Certifications = []CertificationResponseItem{}
 	}
 	if response.PaidSoftware == nil {
 		response.PaidSoftware = []string{}

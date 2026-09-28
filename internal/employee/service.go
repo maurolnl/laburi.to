@@ -3,7 +3,6 @@ package employee
 import (
 	"context"
 	"log"
-	"mime/multipart"
 	"time"
 
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/auth"
@@ -13,8 +12,10 @@ import (
 const orphanCleanupTimeout = 30 * time.Second
 
 type EmployeeService interface {
-	CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest, principal auth.Principal, file multipart.File, filename, contentType string, size int64) error
-	UpdateEmployee(ctx context.Context, employeeID int32, employeeReq CreateEmployeeRequest, file multipart.File, filename, contentType string, size int64) error
+	// CreateEmployee y UpdateEmployee reciben las certificaciones ya validadas en el borde, cada
+	// una con su PDF nuevo, el certificado que conserva o ninguno.
+	CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest, principal auth.Principal, certifications []CertificationEntry) error
+	UpdateEmployee(ctx context.Context, employeeID int32, employeeReq CreateEmployeeRequest, certifications []CertificationEntry) error
 	GetEmployee(ctx context.Context, ID int32) (Employee, error)
 	CreateLocation(ctx context.Context, employeeID int32, locationRequest CreateEmployeeLocationRequest) error
 	UpdateLocation(ctx context.Context, employeeID int32, locationRequest CreateEmployeeLocationRequest) error

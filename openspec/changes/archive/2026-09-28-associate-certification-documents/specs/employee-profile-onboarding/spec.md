@@ -1,8 +1,4 @@
-## Purpose
-
-Definir el contrato protegido para crear, consultar y completar por etapas el perfil de un empleado asociado a su cuenta de usuario.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Creación asociada al usuario autenticado
 La API SHALL crear el perfil base del empleado asociado al usuario autenticado solamente cuando su rol de cuenta persistido sea `employee`, MUST derivar identificador y rol de cuenta del JWT/contexto y MUST impedir que el cliente los reemplace. El campo multipart `role` SHALL conservar su significado actual de especialidad profesional del employee.
@@ -54,17 +50,6 @@ La API SHALL recibir en `POST /employees` y `PUT /employees/{employeeID}` el cam
 - **WHEN** los archivos se cargan correctamente pero falla la persistencia del empleado o de su metadata
 - **THEN** la API informa el fallo y elimina de forma compensatoria los objetos cargados
 
-### Requirement: Consulta protegida con correo relacionado
-La API SHALL devolver el empleado del usuario solicitado junto con el correo vigente de su cuenta y MUST impedir que un usuario consulte el perfil de otro.
-
-#### Scenario: Consulta del perfil propio
-- **WHEN** un usuario autenticado consulta `/users/{userID}/employee` usando su propio identificador
-- **THEN** la API responde `200` con el empleado y el correo obtenido de la cuenta relacionada
-
-#### Scenario: Consulta de otro usuario
-- **WHEN** un usuario autenticado consulta el perfil correspondiente a otro `userID`
-- **THEN** la API responde `403` sin exponer datos del empleado
-
 ### Requirement: Actualización por sección del perfil
 La API SHALL ofrecer actualizaciones independientes para datos base, locación, recursos técnicos, disponibilidad y educación, y MUST comprobar la propiedad del empleado antes de modificar cualquier sección.
 
@@ -90,6 +75,8 @@ La API MUST validar todos los campos obligatorios aun cuando contengan su valor 
 #### Scenario: Campo opcional ausente
 - **WHEN** una petición válida no incluye un campo opcional
 - **THEN** la API procesa la operación sin exigir ese campo
+
+## ADDED Requirements
 
 ### Requirement: Reemplazo y baja de certificados sin huérfanos
 En `PUT /employees/{employeeID}` el arreglo `certifications` SHALL reemplazar el conjunto de certificaciones. Un certificado asociado que la petición no conserva mediante `document_id` —porque su certificación recibe un PDF nuevo, queda sin PDF o se elimina— MUST quedar con estado `deleted` en la misma transacción que la actualización, y su objeto MUST borrarse del almacenamiento después de confirmarla. Un certificado conservado por `document_id` SHALL quedar asociado al `name` del ítem que lo referencia. Los certificados sin asociar que ningún ítem referencia MUST NOT modificarse. En ningún momento una certificación MUST tener más de un certificado activo.

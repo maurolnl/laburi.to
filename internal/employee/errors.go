@@ -12,6 +12,11 @@ var (
 	ErrBadLocationBody               = errors.New("invalid location request body")
 	ErrInvalidMultiPartForm          = errors.New("invalid multipart form")
 
+	// ErrInvalidCertifications agrupa toda violación del contrato de certificaciones del paso
+	// base: formato, nombres, referencias a archivos y certificados conservados que no son del
+	// empleado. Siempre se responde 400 con el detalle envuelto.
+	ErrInvalidCertifications = errors.New("invalid certifications")
+
 	// ErrEmployeeProfileNotFound es la ausencia del empleado en la lectura por identificador.
 	// No llega nunca al cliente tal cual: la autorización lo convierte en la misma respuesta
 	// que el perfil ajeno, para que nadie pueda descubrir qué identificadores existen.

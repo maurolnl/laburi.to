@@ -2,6 +2,7 @@ package employee
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"mime/multipart"
 	"net/http"
@@ -83,31 +84,50 @@ func makeEmployerToken(t *testing.T, secret string, userID int32) string {
 	return makeToken(t, secret, userID, user.UserRoleEmployer)
 }
 
+// expectJSONError verifica que un rechazo viaje como {"error": "..."}: el formato que el
+// frontend muestra tal cual.
+func expectJSONError(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body["error"] == "" {
+		t.Fatalf("expected JSON error body, got %q", rec.Body.String())
+	}
+}
+
 func TestCreateEmployee(t *testing.T) {
 	secret := "test-secret"
+	baseFields := func(certifications string) map[string]string {
+		fields := map[string]string{"position": "Dev", "role": "Backend", "years_of_experience": string(Years2To5Y)}
+		if certifications != "" {
+			fields["certifications"] = certifications
+		}
+		return fields
+	}
 
 	tests := []struct {
-		name          string
-		authorization string
-		fields        map[string]string
-		files         []multipartFilePart
-		expectedCode  int
-		expectCall    bool
-		expectedUser  int32
-		expectedRole  user.UserRole
-		expectedFile  bool
-		serviceErr    error
+		name            string
+		authorization   string
+		fields          map[string]string
+		files           []multipartFilePart
+		expectedCode    int
+		expectCall      bool
+		expectedUser    int32
+		expectedRole    user.UserRole
+		expectedNames   []string
+		expectedUploads map[string]string
+		serviceErr      error
 	}{
 		{
 			name:         "missing authentication",
-			fields:       map[string]string{"position": "Dev", "role": "Backend", "years_of_experience": string(Years2To5Y)},
+			fields:       baseFields(""),
 			expectedCode: http.StatusUnauthorized,
 			expectCall:   false,
 		},
 		{
 			name:          "employer is forbidden",
 			authorization: "Bearer " + makeEmployerToken(t, secret, 7),
-			fields:        map[string]string{"position": "Dev", "role": "Backend", "years_of_experience": string(Years2To5Y)},
+			fields:        baseFields(""),
 			expectedCode:  http.StatusForbidden,
 			expectCall:    true,
 			expectedUser:  7,
@@ -115,58 +135,74 @@ func TestCreateEmployee(t *testing.T) {
 			serviceErr:    user.ErrProfileRoleForbidden,
 		},
 		{
-			name:          "valid multipart without file",
+			name:          "certification without PDF ignores client user id",
 			authorization: "Bearer " + makeEmployeeToken(t, secret, 7),
-			fields:        map[string]string{"position": "Dev", "role": "Backend", "years_of_experience": string(Years2To5Y), "certifications": `["aws"]`, "user_id": "999"},
+			fields: map[string]string{
+				"position": "Dev", "role": "Backend", "years_of_experience": string(Years2To5Y),
+				"certifications": `[{"name": "aws"}]`, "user_id": "999",
+			},
 			expectedCode:  http.StatusCreated,
 			expectCall:    true,
 			expectedUser:  7,
 			expectedRole:  user.UserRoleEmployee,
-			expectedFile:  false,
+			expectedNames: []string{"aws"},
 		},
 		{
-			name:          "valid multipart with singular certifications_file",
+			name:          "one PDF per certification",
 			authorization: "Bearer " + makeEmployeeToken(t, secret, 7),
-			fields:        map[string]string{"position": "Dev", "role": "Backend", "years_of_experience": string(Years2To5Y)},
+			fields:        baseFields(`[{"name": "Scrum Master", "document": "certification_document_0"}, {"name": "AWS", "document": "certification_document_1"}]`),
 			files: []multipartFilePart{
-				{name: "certifications_file", filename: "cert.pdf", contentType: "application/pdf", content: "%PDF-1.4"},
+				pdfPart("certification_document_0", "scrum.pdf"),
+				pdfPart("certification_document_1", "aws.pdf"),
 			},
-			expectedCode: http.StatusCreated,
-			expectCall:   true,
-			expectedUser: 7,
-			expectedRole: user.UserRoleEmployee,
-			expectedFile: true,
+			expectedCode:    http.StatusCreated,
+			expectCall:      true,
+			expectedUser:    7,
+			expectedRole:    user.UserRoleEmployee,
+			expectedNames:   []string{"Scrum Master", "AWS"},
+			expectedUploads: map[string]string{"Scrum Master": "scrum.pdf", "AWS": "aws.pdf"},
 		},
 		{
-			name:          "rejects multiple certifications_file parts",
+			name:          "rejects legacy certifications_file",
 			authorization: "Bearer " + makeEmployeeToken(t, secret, 7),
-			fields:        map[string]string{"position": "Dev", "role": "Backend", "years_of_experience": string(Years2To5Y)},
-			files: []multipartFilePart{
-				{name: "certifications_file", filename: "one.pdf", contentType: "application/pdf", content: "%PDF"},
-				{name: "certifications_file", filename: "two.pdf", contentType: "application/pdf", content: "%PDF"},
-			},
-			expectedCode: http.StatusBadRequest,
-			expectCall:   false,
+			fields:        baseFields(`[{"name": "AWS"}]`),
+			files:         []multipartFilePart{pdfPart("certifications_file", "cert.pdf")},
+			expectedCode:  http.StatusBadRequest,
 		},
 		{
 			name:          "rejects non-pdf file",
 			authorization: "Bearer " + makeEmployeeToken(t, secret, 7),
-			fields:        map[string]string{"position": "Dev", "role": "Backend", "years_of_experience": string(Years2To5Y)},
+			fields:        baseFields(`[{"name": "AWS", "document": "cert0"}]`),
 			files: []multipartFilePart{
-				{name: "certifications_file", filename: "cert.txt", contentType: "text/plain", content: "text"},
+				{name: "cert0", filename: "cert.txt", contentType: "text/plain", content: "text"},
 			},
 			expectedCode: http.StatusBadRequest,
-			expectCall:   false,
 		},
 		{
 			name:          "rejects PDF larger than five megabytes",
 			authorization: "Bearer " + makeEmployeeToken(t, secret, 7),
-			fields:        map[string]string{"position": "Dev", "role": "Backend", "years_of_experience": string(Years2To5Y)},
+			fields:        baseFields(`[{"name": "AWS", "document": "cert0"}]`),
 			files: []multipartFilePart{
-				{name: "certifications_file", filename: "large.pdf", contentType: "application/pdf", content: strings.Repeat("x", maxUploadSize+1)},
+				{name: "cert0", filename: "large.pdf", contentType: "application/pdf", content: strings.Repeat("x", maxUploadSize+1)},
 			},
 			expectedCode: http.StatusBadRequest,
-			expectCall:   false,
+		},
+		{
+			name:          "invalid base data answers JSON",
+			authorization: "Bearer " + makeEmployeeToken(t, secret, 7),
+			fields:        map[string]string{"role": "Backend", "years_of_experience": "invalid"},
+			expectedCode:  http.StatusBadRequest,
+		},
+		{
+			name:          "service rejects certifications",
+			authorization: "Bearer " + makeEmployeeToken(t, secret, 7),
+			fields:        baseFields(`[{"name": "AWS", "document_id": 4}]`),
+			expectedCode:  http.StatusBadRequest,
+			expectCall:    true,
+			expectedUser:  7,
+			expectedRole:  user.UserRoleEmployee,
+			expectedNames: []string{"AWS"},
+			serviceErr:    invalidCertifications("certification document not found"),
 		},
 	}
 
@@ -191,36 +227,47 @@ func TestCreateEmployee(t *testing.T) {
 			if rec.Code != tt.expectedCode {
 				t.Fatalf("expected status %d, got %d: %s", tt.expectedCode, rec.Code, rec.Body.String())
 			}
-
-			fake.mu.Lock()
-			calls := len(fake.createEmployeeCalls)
-			fake.mu.Unlock()
-
-			if calls > 0 != tt.expectCall {
-				t.Fatalf("expected service call=%v, got %v", tt.expectCall, calls > 0)
+			if rec.Code >= http.StatusBadRequest {
+				expectJSONError(t, rec)
 			}
 
-			if tt.expectCall {
-				fake.mu.Lock()
-				call := fake.createEmployeeCalls[0]
-				fake.mu.Unlock()
+			fake.mu.Lock()
+			calls := fake.createEmployeeCalls
+			fake.mu.Unlock()
 
-				if call.Principal.UserID != tt.expectedUser {
-					t.Fatalf("expected userID %d, got %d", tt.expectedUser, call.Principal.UserID)
+			if len(calls) > 0 != tt.expectCall {
+				t.Fatalf("expected service call=%v, got %v", tt.expectCall, len(calls) > 0)
+			}
+			if !tt.expectCall {
+				return
+			}
+
+			call := calls[0]
+			if call.Principal.UserID != tt.expectedUser {
+				t.Fatalf("expected userID %d, got %d", tt.expectedUser, call.Principal.UserID)
+			}
+			if call.Principal.Role != tt.expectedRole {
+				t.Fatalf("expected role %q, got %q", tt.expectedRole, call.Principal.Role)
+			}
+			if call.Req.Position != tt.fields["position"] {
+				t.Fatalf("expected position %q, got %q", tt.fields["position"], call.Req.Position)
+			}
+			if strings.Join(call.Req.Certifications, "|") != strings.Join(tt.expectedNames, "|") {
+				t.Fatalf("expected names %v, got %v", tt.expectedNames, call.Req.Certifications)
+			}
+
+			uploads := map[string]string{}
+			for _, certification := range call.Certifications {
+				if certification.Upload != nil {
+					uploads[certification.Name] = certification.Upload.Filename
 				}
-				if call.Principal.Role != tt.expectedRole {
-					t.Fatalf("expected role %q, got %q", tt.expectedRole, call.Principal.Role)
-				}
-				if call.Req.Position != tt.fields["position"] {
-					t.Fatalf("expected position %q, got %q", tt.fields["position"], call.Req.Position)
-				}
-				if (call.File != nil) != tt.expectedFile {
-					t.Fatalf("expected file present=%v, got %v", tt.expectedFile, call.File != nil)
-				}
-				if tt.expectedFile {
-					if call.Filename != "cert.pdf" || call.ContentType != "application/pdf" || call.Size != 8 {
-						t.Fatalf("unexpected file metadata: filename=%s contentType=%s size=%d", call.Filename, call.ContentType, call.Size)
-					}
+			}
+			if len(uploads) != len(tt.expectedUploads) {
+				t.Fatalf("expected uploads %v, got %v", tt.expectedUploads, uploads)
+			}
+			for name, filename := range tt.expectedUploads {
+				if uploads[name] != filename {
+					t.Fatalf("expected %q to upload %q, got %v", name, filename, uploads)
 				}
 			}
 		})
@@ -228,40 +275,54 @@ func TestCreateEmployee(t *testing.T) {
 }
 
 func TestUpdateEmployee(t *testing.T) {
-	h, fake := newTestHandler(t)
-
-	fields := map[string]string{"position": "Senior Dev", "role": "Backend", "years_of_experience": string(Years5To10Y)}
-	files := []multipartFilePart{
-		{name: "certifications_file", filename: "updated.pdf", contentType: "application/pdf", content: "%PDF-1.5"},
-	}
-	req := newEmployeeMultipartRequest(t, fields, files)
-	req.SetPathValue("employeeID", "3")
-	req.Method = "PUT"
-
-	rec := httptest.NewRecorder()
-	h.UpdateEmployee(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	newRequest := func(t *testing.T) *http.Request {
+		fields := map[string]string{
+			"position": "Senior Dev", "role": "Backend", "years_of_experience": string(Years5To10Y),
+			"certifications": `[{"name": "Scrum Master", "document_id": 31}, {"name": "AWS", "document": "certification_document_1"}]`,
+		}
+		req := newEmployeeMultipartRequest(t, fields, []multipartFilePart{pdfPart("certification_document_1", "updated.pdf")})
+		req.SetPathValue("employeeID", "3")
+		req.Method = "PUT"
+		return req
 	}
 
-	fake.mu.Lock()
-	calls := len(fake.updateEmployeeCalls)
-	if calls != 1 {
-		t.Fatalf("expected 1 update call, got %d", calls)
-	}
-	call := fake.updateEmployeeCalls[0]
-	fake.mu.Unlock()
+	t.Run("passes kept and new documents", func(t *testing.T) {
+		h, fake := newTestHandler(t)
+		rec := httptest.NewRecorder()
+		h.UpdateEmployee(rec, newRequest(t))
 
-	if call.EmployeeID != 3 {
-		t.Fatalf("expected employeeID 3, got %d", call.EmployeeID)
-	}
-	if call.File == nil {
-		t.Fatal("expected file in update call")
-	}
-	if call.Filename != "updated.pdf" || call.ContentType != "application/pdf" {
-		t.Fatalf("unexpected file metadata: filename=%s contentType=%s", call.Filename, call.ContentType)
-	}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+		}
+
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		if len(fake.updateEmployeeCalls) != 1 {
+			t.Fatalf("expected 1 update call, got %d", len(fake.updateEmployeeCalls))
+		}
+		call := fake.updateEmployeeCalls[0]
+		if call.EmployeeID != 3 {
+			t.Fatalf("expected employeeID 3, got %d", call.EmployeeID)
+		}
+		if len(call.Certifications) != 2 || call.Certifications[0].KeepFileID == nil || *call.Certifications[0].KeepFileID != 31 {
+			t.Fatalf("unexpected kept certification: %+v", call.Certifications)
+		}
+		if upload := call.Certifications[1].Upload; upload == nil || upload.Filename != "updated.pdf" || upload.ContentType != "application/pdf" {
+			t.Fatalf("unexpected new document: %+v", call.Certifications[1])
+		}
+	})
+
+	t.Run("foreign document_id is a bad request", func(t *testing.T) {
+		h, fake := newTestHandler(t)
+		fake.updateEmployeeErr = invalidCertifications("certification document not found")
+		rec := httptest.NewRecorder()
+		h.UpdateEmployee(rec, newRequest(t))
+
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected status 400, got %d: %s", rec.Code, rec.Body.String())
+		}
+		expectJSONError(t, rec)
+	})
 }
 
 func TestGetEmployee(t *testing.T) {
