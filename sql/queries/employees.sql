@@ -1,33 +1,3 @@
--- name: CreateEmployee :one
-WITH new_employee AS (
-  INSERT INTO employees(position, role, years_of_experience, certifications, portfolio_url, user_id, created_at, updated_at)
-  VALUES(
-    $1,
-    $2,
-    $3,
-    $4,
-    $5,
-    $6,
-    NOW(),
-    NOW()
-  )
-  RETURNING *
-) INSERT INTO employee_files(
-    employee_id,
-    type,
-    bucket,
-    object_key,
-    original_filename,
-    content_type,
-    size_bytes,
-    checksum_sha256,
-    status,
-    created_at,
-    uploaded_at,
-    updated_at
-) SELECT id, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW(), NOW() FROM 
-  new_employee RETURNING employee_id;
-
 -- name: CreateEmployeeWithoutFile :one
 INSERT INTO employees(position, role, years_of_experience, certifications, portfolio_url, user_id, created_at, updated_at)
 VALUES($1, $2, $3, $4, $5, $6, NOW(), NOW())
@@ -55,6 +25,7 @@ INSERT INTO employee_files(
   size_bytes,
   checksum_sha256,
   status,
+  certification_name,
   created_at,
   uploaded_at,
   updated_at
@@ -68,10 +39,49 @@ INSERT INTO employee_files(
   $7,
   $8,
   $9,
+  $10,
   NOW(),
   NOW(),
   NOW()
 );
+
+-- Los certificados que una actualización conserva por document_id tienen que ser del mismo
+-- empleado y estar cargados. Devuelve los que cumplen; el llamador compara contra lo pedido.
+-- name: ListUploadedEmployeeFileIDs :many
+SELECT id
+FROM employee_files
+WHERE employee_id = sqlc.arg(employee_id)
+  AND id = ANY(sqlc.arg(ids)::int[])
+  AND status = 'uploaded';
+
+-- Da de baja los certificados asociados que la actualización no conserva y devuelve su
+-- ubicación para borrarlos del almacenamiento después del commit. Los certificados sin
+-- asociar no se tocan: solo se modifican si un ítem los referencia.
+-- name: MarkUnkeptCertificationFilesDeleted :many
+UPDATE employee_files
+SET status = 'deleted',
+    updated_at = NOW()
+WHERE employee_id = sqlc.arg(employee_id)
+  AND status = 'uploaded'
+  AND certification_name IS NOT NULL
+  AND NOT (id = ANY(sqlc.arg(kept_ids)::int[]))
+RETURNING bucket, object_key;
+
+-- Libera el nombre de los certificados conservados antes de reasignarlo, para que renombrar o
+-- intercambiar certificaciones no choque de forma transitoria con el índice único.
+-- name: ClearEmployeeFileCertificationNames :exec
+UPDATE employee_files
+SET certification_name = NULL,
+    updated_at = NOW()
+WHERE employee_id = sqlc.arg(employee_id)
+  AND id = ANY(sqlc.arg(ids)::int[]);
+
+-- name: SetEmployeeFileCertificationName :exec
+UPDATE employee_files
+SET certification_name = sqlc.arg(certification_name),
+    updated_at = NOW()
+WHERE employee_id = sqlc.arg(employee_id)
+  AND id = sqlc.arg(id);
 
 -- name: GetEmployee :one
 SELECT
@@ -79,7 +89,6 @@ SELECT
     employees.position,
     employees.role,
     employees.years_of_experience,
-    employees.certifications,
     employees.portfolio_url,
     employees.created_at,
     employees.updated_at,
@@ -93,7 +102,8 @@ SELECT
     employee_profile_availability.incompatible_projects,
     COALESCE((SELECT jsonb_agg(jsonb_build_object('type', type, 'speed', speed)) FROM employee_internet_connections WHERE employee_id = employees.id), '[]'::jsonb)::text AS internet_connections,
     COALESCE((SELECT jsonb_agg(jsonb_build_object('education_type', education_type, 'title', title, 'status', status, 'certification', certification)) FROM employee_education WHERE employee_id = employees.id), '[]'::jsonb)::text AS education,
-    COALESCE((SELECT jsonb_agg(jsonb_build_object('title', original_filename)) FROM employee_files WHERE employee_id = employees.id), '[]'::jsonb)::text AS files
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('name', c.name, 'document_id', f.id) ORDER BY c.ordinal) FROM unnest(employees.certifications) WITH ORDINALITY AS c(name, ordinal) LEFT JOIN employee_files f ON f.employee_id = employees.id AND f.status = 'uploaded' AND f.certification_name = c.name), '[]'::jsonb)::text AS certification_items,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'title', original_filename) ORDER BY id) FROM employee_files WHERE employee_id = employees.id AND status = 'uploaded' AND certification_name IS NULL), '[]'::jsonb)::text AS files
 FROM employees
 JOIN users ON employees.user_id = users.id
 LEFT JOIN employee_location ON employee_location.employee_id = employees.id
@@ -263,9 +273,10 @@ SELECT (
 -- no una variante de su WHERE porque no devuelve lo mismo: acá ningún archivo viaja con su
 -- ubicación.
 --
--- files incluye el identificador de cada certificado y omite los que todavía no terminaron de
--- subirse, para que la lista coincida exactamente con lo que las rutas de entrega aceptan
--- servir. education reemplaza el object_key crudo por el identificador con el que se pide la
+-- certification_items devuelve cada certificación en el orden declarado con el identificador
+-- de su certificado activo, nulo si no tiene. files lista solo los certificados activos sin
+-- certificación asociada (cargados antes de LAB-40). Ambos omiten lo que no está cargado, para
+-- que coincidan exactamente con lo que las rutas de entrega aceptan servir. education reemplaza el object_key crudo por el identificador con el que se pide la
 -- entrega del documento, nulo cuando el título no tiene ninguno.
 -- name: GetEmployeeProfileByID :one
 SELECT
@@ -273,7 +284,6 @@ SELECT
     employees.position,
     employees.role,
     employees.years_of_experience,
-    employees.certifications,
     employees.portfolio_url,
     employees.created_at,
     employees.updated_at,
@@ -287,7 +297,8 @@ SELECT
     employee_profile_availability.incompatible_projects,
     COALESCE((SELECT jsonb_agg(jsonb_build_object('type', type, 'speed', speed) ORDER BY id) FROM employee_internet_connections WHERE employee_id = employees.id), '[]'::jsonb)::text AS internet_connections,
     COALESCE((SELECT jsonb_agg(jsonb_build_object('education_type', education_type, 'title', title, 'status', status, 'certification_document_id', CASE WHEN certification IS NOT NULL AND btrim(certification) <> '' THEN id END) ORDER BY id) FROM employee_education WHERE employee_id = employees.id), '[]'::jsonb)::text AS education,
-    COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'title', original_filename) ORDER BY id) FROM employee_files WHERE employee_id = employees.id AND status = 'uploaded'), '[]'::jsonb)::text AS files
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('name', c.name, 'document_id', f.id) ORDER BY c.ordinal) FROM unnest(employees.certifications) WITH ORDINALITY AS c(name, ordinal) LEFT JOIN employee_files f ON f.employee_id = employees.id AND f.status = 'uploaded' AND f.certification_name = c.name), '[]'::jsonb)::text AS certification_items,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'title', original_filename) ORDER BY id) FROM employee_files WHERE employee_id = employees.id AND status = 'uploaded' AND certification_name IS NULL), '[]'::jsonb)::text AS files
 FROM employees
 JOIN users ON employees.user_id = users.id
 LEFT JOIN employee_location ON employee_location.employee_id = employees.id

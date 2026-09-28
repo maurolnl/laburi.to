@@ -13,74 +13,24 @@ import (
 	"github.com/lib/pq"
 )
 
-const createEmployee = `-- name: CreateEmployee :one
-WITH new_employee AS (
-  INSERT INTO employees(position, role, years_of_experience, certifications, portfolio_url, user_id, created_at, updated_at)
-  VALUES(
-    $1,
-    $2,
-    $3,
-    $4,
-    $5,
-    $6,
-    NOW(),
-    NOW()
-  )
-  RETURNING id, position, role, years_of_experience, certifications, portfolio_url, created_at, updated_at, user_id
-) INSERT INTO employee_files(
-    employee_id,
-    type,
-    bucket,
-    object_key,
-    original_filename,
-    content_type,
-    size_bytes,
-    checksum_sha256,
-    status,
-    created_at,
-    uploaded_at,
-    updated_at
-) SELECT id, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW(), NOW() FROM 
-  new_employee RETURNING employee_id
+const clearEmployeeFileCertificationNames = `-- name: ClearEmployeeFileCertificationNames :exec
+UPDATE employee_files
+SET certification_name = NULL,
+    updated_at = NOW()
+WHERE employee_id = $1
+  AND id = ANY($2::int[])
 `
 
-type CreateEmployeeParams struct {
-	Position          string
-	Role              string
-	YearsOfExperience string
-	Certifications    []string
-	PortfolioUrl      sql.NullString
-	UserID            int32
-	Type              string
-	Bucket            string
-	ObjectKey         string
-	OriginalFilename  string
-	ContentType       string
-	SizeBytes         int64
-	ChecksumSha256    sql.NullString
-	Status            string
+type ClearEmployeeFileCertificationNamesParams struct {
+	EmployeeID int32
+	Ids        []int32
 }
 
-func (q *Queries) CreateEmployee(ctx context.Context, arg CreateEmployeeParams) (int32, error) {
-	row := q.db.QueryRowContext(ctx, createEmployee,
-		arg.Position,
-		arg.Role,
-		arg.YearsOfExperience,
-		pq.Array(arg.Certifications),
-		arg.PortfolioUrl,
-		arg.UserID,
-		arg.Type,
-		arg.Bucket,
-		arg.ObjectKey,
-		arg.OriginalFilename,
-		arg.ContentType,
-		arg.SizeBytes,
-		arg.ChecksumSha256,
-		arg.Status,
-	)
-	var employee_id int32
-	err := row.Scan(&employee_id)
-	return employee_id, err
+// Libera el nombre de los certificados conservados antes de reasignarlo, para que renombrar o
+// intercambiar certificaciones no choque de forma transitoria con el índice único.
+func (q *Queries) ClearEmployeeFileCertificationNames(ctx context.Context, arg ClearEmployeeFileCertificationNamesParams) error {
+	_, err := q.db.ExecContext(ctx, clearEmployeeFileCertificationNames, arg.EmployeeID, pq.Array(arg.Ids))
+	return err
 }
 
 const createEmployeeConnection = `-- name: CreateEmployeeConnection :one
@@ -170,6 +120,7 @@ INSERT INTO employee_files(
   size_bytes,
   checksum_sha256,
   status,
+  certification_name,
   created_at,
   uploaded_at,
   updated_at
@@ -183,6 +134,7 @@ INSERT INTO employee_files(
   $7,
   $8,
   $9,
+  $10,
   NOW(),
   NOW(),
   NOW()
@@ -190,15 +142,16 @@ INSERT INTO employee_files(
 `
 
 type CreateEmployeeFileParams struct {
-	EmployeeID       int32
-	Type             string
-	Bucket           string
-	ObjectKey        string
-	OriginalFilename string
-	ContentType      string
-	SizeBytes        int64
-	ChecksumSha256   sql.NullString
-	Status           string
+	EmployeeID        int32
+	Type              string
+	Bucket            string
+	ObjectKey         string
+	OriginalFilename  string
+	ContentType       string
+	SizeBytes         int64
+	ChecksumSha256    sql.NullString
+	Status            string
+	CertificationName sql.NullString
 }
 
 func (q *Queries) CreateEmployeeFile(ctx context.Context, arg CreateEmployeeFileParams) error {
@@ -212,6 +165,7 @@ func (q *Queries) CreateEmployeeFile(ctx context.Context, arg CreateEmployeeFile
 		arg.SizeBytes,
 		arg.ChecksumSha256,
 		arg.Status,
+		arg.CertificationName,
 	)
 	return err
 }
@@ -373,7 +327,6 @@ SELECT
     employees.position,
     employees.role,
     employees.years_of_experience,
-    employees.certifications,
     employees.portfolio_url,
     employees.created_at,
     employees.updated_at,
@@ -387,7 +340,8 @@ SELECT
     employee_profile_availability.incompatible_projects,
     COALESCE((SELECT jsonb_agg(jsonb_build_object('type', type, 'speed', speed)) FROM employee_internet_connections WHERE employee_id = employees.id), '[]'::jsonb)::text AS internet_connections,
     COALESCE((SELECT jsonb_agg(jsonb_build_object('education_type', education_type, 'title', title, 'status', status, 'certification', certification)) FROM employee_education WHERE employee_id = employees.id), '[]'::jsonb)::text AS education,
-    COALESCE((SELECT jsonb_agg(jsonb_build_object('title', original_filename)) FROM employee_files WHERE employee_id = employees.id), '[]'::jsonb)::text AS files
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('name', c.name, 'document_id', f.id) ORDER BY c.ordinal) FROM unnest(employees.certifications) WITH ORDINALITY AS c(name, ordinal) LEFT JOIN employee_files f ON f.employee_id = employees.id AND f.status = 'uploaded' AND f.certification_name = c.name), '[]'::jsonb)::text AS certification_items,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'title', original_filename) ORDER BY id) FROM employee_files WHERE employee_id = employees.id AND status = 'uploaded' AND certification_name IS NULL), '[]'::jsonb)::text AS files
 FROM employees
 JOIN users ON employees.user_id = users.id
 LEFT JOIN employee_location ON employee_location.employee_id = employees.id
@@ -401,7 +355,6 @@ type GetEmployeeRow struct {
 	Position             string
 	Role                 string
 	YearsOfExperience    string
-	Certifications       []string
 	PortfolioUrl         sql.NullString
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
@@ -415,6 +368,7 @@ type GetEmployeeRow struct {
 	IncompatibleProjects sql.NullInt16
 	InternetConnections  string
 	Education            string
+	CertificationItems   string
 	Files                string
 }
 
@@ -426,7 +380,6 @@ func (q *Queries) GetEmployee(ctx context.Context, id int32) (GetEmployeeRow, er
 		&i.Position,
 		&i.Role,
 		&i.YearsOfExperience,
-		pq.Array(&i.Certifications),
 		&i.PortfolioUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -440,6 +393,7 @@ func (q *Queries) GetEmployee(ctx context.Context, id int32) (GetEmployeeRow, er
 		&i.IncompatibleProjects,
 		&i.InternetConnections,
 		&i.Education,
+		&i.CertificationItems,
 		&i.Files,
 	)
 	return i, err
@@ -641,7 +595,6 @@ SELECT
     employees.position,
     employees.role,
     employees.years_of_experience,
-    employees.certifications,
     employees.portfolio_url,
     employees.created_at,
     employees.updated_at,
@@ -655,7 +608,8 @@ SELECT
     employee_profile_availability.incompatible_projects,
     COALESCE((SELECT jsonb_agg(jsonb_build_object('type', type, 'speed', speed) ORDER BY id) FROM employee_internet_connections WHERE employee_id = employees.id), '[]'::jsonb)::text AS internet_connections,
     COALESCE((SELECT jsonb_agg(jsonb_build_object('education_type', education_type, 'title', title, 'status', status, 'certification_document_id', CASE WHEN certification IS NOT NULL AND btrim(certification) <> '' THEN id END) ORDER BY id) FROM employee_education WHERE employee_id = employees.id), '[]'::jsonb)::text AS education,
-    COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'title', original_filename) ORDER BY id) FROM employee_files WHERE employee_id = employees.id AND status = 'uploaded'), '[]'::jsonb)::text AS files
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('name', c.name, 'document_id', f.id) ORDER BY c.ordinal) FROM unnest(employees.certifications) WITH ORDINALITY AS c(name, ordinal) LEFT JOIN employee_files f ON f.employee_id = employees.id AND f.status = 'uploaded' AND f.certification_name = c.name), '[]'::jsonb)::text AS certification_items,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('id', id, 'title', original_filename) ORDER BY id) FROM employee_files WHERE employee_id = employees.id AND status = 'uploaded' AND certification_name IS NULL), '[]'::jsonb)::text AS files
 FROM employees
 JOIN users ON employees.user_id = users.id
 LEFT JOIN employee_location ON employee_location.employee_id = employees.id
@@ -669,7 +623,6 @@ type GetEmployeeProfileByIDRow struct {
 	Position             string
 	Role                 string
 	YearsOfExperience    string
-	Certifications       []string
 	PortfolioUrl         sql.NullString
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
@@ -683,6 +636,7 @@ type GetEmployeeProfileByIDRow struct {
 	IncompatibleProjects sql.NullInt16
 	InternetConnections  string
 	Education            string
+	CertificationItems   string
 	Files                string
 }
 
@@ -691,9 +645,10 @@ type GetEmployeeProfileByIDRow struct {
 // no una variante de su WHERE porque no devuelve lo mismo: acá ningún archivo viaja con su
 // ubicación.
 //
-// files incluye el identificador de cada certificado y omite los que todavía no terminaron de
-// subirse, para que la lista coincida exactamente con lo que las rutas de entrega aceptan
-// servir. education reemplaza el object_key crudo por el identificador con el que se pide la
+// certification_items devuelve cada certificación en el orden declarado con el identificador
+// de su certificado activo, nulo si no tiene. files lista solo los certificados activos sin
+// certificación asociada (cargados antes de LAB-40). Ambos omiten lo que no está cargado, para
+// que coincidan exactamente con lo que las rutas de entrega aceptan servir. education reemplaza el object_key crudo por el identificador con el que se pide la
 // entrega del documento, nulo cuando el título no tiene ninguno.
 func (q *Queries) GetEmployeeProfileByID(ctx context.Context, id int32) (GetEmployeeProfileByIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getEmployeeProfileByID, id)
@@ -703,7 +658,6 @@ func (q *Queries) GetEmployeeProfileByID(ctx context.Context, id int32) (GetEmpl
 		&i.Position,
 		&i.Role,
 		&i.YearsOfExperience,
-		pq.Array(&i.Certifications),
 		&i.PortfolioUrl,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -717,6 +671,7 @@ func (q *Queries) GetEmployeeProfileByID(ctx context.Context, id int32) (GetEmpl
 		&i.IncompatibleProjects,
 		&i.InternetConnections,
 		&i.Education,
+		&i.CertificationItems,
 		&i.Files,
 	)
 	return i, err
@@ -765,6 +720,110 @@ func (q *Queries) IsEmployeeProfileComplete(ctx context.Context, id int32) (bool
 	var complete bool
 	err := row.Scan(&complete)
 	return complete, err
+}
+
+const listUploadedEmployeeFileIDs = `-- name: ListUploadedEmployeeFileIDs :many
+SELECT id
+FROM employee_files
+WHERE employee_id = $1
+  AND id = ANY($2::int[])
+  AND status = 'uploaded'
+`
+
+type ListUploadedEmployeeFileIDsParams struct {
+	EmployeeID int32
+	Ids        []int32
+}
+
+// Los certificados que una actualización conserva por document_id tienen que ser del mismo
+// empleado y estar cargados. Devuelve los que cumplen; el llamador compara contra lo pedido.
+func (q *Queries) ListUploadedEmployeeFileIDs(ctx context.Context, arg ListUploadedEmployeeFileIDsParams) ([]int32, error) {
+	rows, err := q.db.QueryContext(ctx, listUploadedEmployeeFileIDs, arg.EmployeeID, pq.Array(arg.Ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int32
+	for rows.Next() {
+		var id int32
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markUnkeptCertificationFilesDeleted = `-- name: MarkUnkeptCertificationFilesDeleted :many
+UPDATE employee_files
+SET status = 'deleted',
+    updated_at = NOW()
+WHERE employee_id = $1
+  AND status = 'uploaded'
+  AND certification_name IS NOT NULL
+  AND NOT (id = ANY($2::int[]))
+RETURNING bucket, object_key
+`
+
+type MarkUnkeptCertificationFilesDeletedParams struct {
+	EmployeeID int32
+	KeptIds    []int32
+}
+
+type MarkUnkeptCertificationFilesDeletedRow struct {
+	Bucket    string
+	ObjectKey string
+}
+
+// Da de baja los certificados asociados que la actualización no conserva y devuelve su
+// ubicación para borrarlos del almacenamiento después del commit. Los certificados sin
+// asociar no se tocan: solo se modifican si un ítem los referencia.
+func (q *Queries) MarkUnkeptCertificationFilesDeleted(ctx context.Context, arg MarkUnkeptCertificationFilesDeletedParams) ([]MarkUnkeptCertificationFilesDeletedRow, error) {
+	rows, err := q.db.QueryContext(ctx, markUnkeptCertificationFilesDeleted, arg.EmployeeID, pq.Array(arg.KeptIds))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MarkUnkeptCertificationFilesDeletedRow
+	for rows.Next() {
+		var i MarkUnkeptCertificationFilesDeletedRow
+		if err := rows.Scan(&i.Bucket, &i.ObjectKey); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setEmployeeFileCertificationName = `-- name: SetEmployeeFileCertificationName :exec
+UPDATE employee_files
+SET certification_name = $1,
+    updated_at = NOW()
+WHERE employee_id = $2
+  AND id = $3
+`
+
+type SetEmployeeFileCertificationNameParams struct {
+	CertificationName sql.NullString
+	EmployeeID        int32
+	ID                int32
+}
+
+func (q *Queries) SetEmployeeFileCertificationName(ctx context.Context, arg SetEmployeeFileCertificationNameParams) error {
+	_, err := q.db.ExecContext(ctx, setEmployeeFileCertificationName, arg.CertificationName, arg.EmployeeID, arg.ID)
+	return err
 }
 
 const updateEmployee = `-- name: UpdateEmployee :exec

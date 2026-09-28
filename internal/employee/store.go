@@ -3,8 +3,16 @@ package employee
 import "context"
 
 type EmployeeStore interface {
-	CreateEmployee(ctx context.Context, employee CreateEmployeeRequest, userID int32, file *EmployeeFileMetadata) (int32, error)
-	UpdateEmployee(ctx context.Context, employeeID int32, employee CreateEmployeeRequest, file *EmployeeFileMetadata) error
+	// CreateEmployee crea el empleado y sus certificados en una transacción. Cada archivo lleva
+	// el nombre de la certificación a la que pertenece.
+	CreateEmployee(ctx context.Context, employee CreateEmployeeRequest, userID int32, files []EmployeeFileMetadata) (int32, error)
+
+	// UpdateEmployee reemplaza el paso base y su conjunto de certificados en una transacción:
+	// conserva y reasocia kept, da de baja los certificados asociados que no están en kept e
+	// inserta files. Devuelve la ubicación de los dados de baja para borrarlos del
+	// almacenamiento después del commit. Un certificado de kept que no es del empleado o no
+	// está cargado devuelve ErrInvalidCertifications sin persistir nada.
+	UpdateEmployee(ctx context.Context, employeeID int32, employee CreateEmployeeRequest, kept []KeptCertificationFile, files []EmployeeFileMetadata) ([]RemovedFile, error)
 	CreateLocationWithConnections(ctx context.Context, employeeID int32, locationRequest CreateEmployeeLocationRequest) error
 	UpdateLocationWithConnections(ctx context.Context, employeeID int32, locationRequest CreateEmployeeLocationRequest) error
 	CreateTech(ctx context.Context, employeeID int32, techRequest CreateEmployeeTechRequest) error
@@ -72,4 +80,6 @@ type EmployeeFileMetadata struct {
 	SizeBytes        int64
 	ChecksumSHA256   string
 	Status           string
+	// CertificationName es la certificación a la que pertenece el archivo.
+	CertificationName string
 }

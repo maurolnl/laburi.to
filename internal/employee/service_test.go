@@ -3,7 +3,6 @@ package employee
 import (
 	"context"
 	"errors"
-	"mime/multipart"
 	"strings"
 	"testing"
 	"time"
@@ -49,94 +48,100 @@ func newTestServiceWithPublisher(t *testing.T) (*employeeService, *fakeEmployeeS
 	return NewService(store, upl, &fakeRecommendationAccess{}, publisher).(*employeeService), store, upl, publisher
 }
 
-func TestCreateEmployeeUploadMetadata(t *testing.T) {
-	employeePrincipal := auth.Principal{UserID: 1, Role: user.UserRoleEmployee}
+func pdfUpload(filename string) *CertificationUpload {
+	return &CertificationUpload{File: newFakeFile("%PDF-1.4"), Filename: filename, ContentType: "application/pdf", Size: 8}
+}
 
-	tests := []struct {
-		name         string
-		file         *fakeFile
-		filename     string
-		contentType  string
-		size         int64
-		expectedNil  bool
-		expectedType string
-	}{
-		{
-			name:        "without file",
-			expectedNil: true,
-		},
-		{
-			name:         "with valid PDF file",
-			file:         newFakeFile("%PDF-1.4"),
-			filename:     "cert.pdf",
-			contentType:  "application/pdf",
-			size:         8,
-			expectedNil:  false,
-			expectedType: certificationFileType,
-		},
+func int32Ptr(value int32) *int32 {
+	return &value
+}
+
+func expectDeletes(t *testing.T, upl *fakeUploader, keys ...string) {
+	t.Helper()
+
+	got := map[string]bool{}
+	for range keys {
+		select {
+		case call := <-upl.deleteCalls:
+			got[call.Key] = true
+		case <-time.After(2 * time.Second):
+			t.Fatalf("expected asynchronous deletes for %v, got %v", keys, got)
+		}
+	}
+	for _, key := range keys {
+		if !got[key] {
+			t.Fatalf("expected delete of %q, got %v", key, got)
+		}
+	}
+}
+
+func TestCreateEmployeeUploadsOnePDFPerCertification(t *testing.T) {
+	service, store, upl := newTestService(t)
+	employeePrincipal := auth.Principal{UserID: 1, Role: user.UserRoleEmployee}
+	req := CreateEmployeeRequest{BaseEmployeeRequest: BaseEmployeeRequest{Position: "Dev", Role: "Backend", YearsOfExperience: Years2To5Y}}
+
+	err := service.CreateEmployee(context.Background(), req, employeePrincipal, []CertificationEntry{
+		{Name: "Scrum Master", Upload: pdfUpload("scrum.pdf")},
+		{Name: "AWS Cloud Practitioner", Upload: pdfUpload("aws.pdf")},
+		{Name: "ITIL"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			service, store, uploader := newTestService(t)
-			req := CreateEmployeeRequest{BaseEmployeeRequest: BaseEmployeeRequest{Position: "Dev", Role: "Backend", YearsOfExperience: Years2To5Y}}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if len(store.createEmployeeCalls) != 1 {
+		t.Fatalf("expected 1 store call, got %d", len(store.createEmployeeCalls))
+	}
+	files := store.createEmployeeCalls[0].Files
+	if len(files) != 2 {
+		t.Fatalf("expected 2 files, got %+v", files)
+	}
 
-			var file multipart.File
-			if tt.file != nil {
-				file = tt.file
-			}
+	want := map[string]string{"Scrum Master": "scrum.pdf", "AWS Cloud Practitioner": "aws.pdf"}
+	for _, file := range files {
+		if want[file.CertificationName] != file.OriginalFilename {
+			t.Fatalf("file %q associated to %q", file.OriginalFilename, file.CertificationName)
+		}
+		if file.Type != certificationFileType || file.Status != employeeFileStatusUploaded || file.ChecksumSHA256 != "deadbeef" {
+			t.Fatalf("unexpected metadata: %+v", file)
+		}
+		if file.Bucket != "test-bucket" || file.ObjectKey != "employees/"+file.OriginalFilename || file.SizeBytes != 8 {
+			t.Fatalf("unexpected location: %+v", file)
+		}
+	}
 
-			err := service.CreateEmployee(context.Background(), req, employeePrincipal, file, tt.filename, tt.contentType, tt.size)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
+	upl.mu.Lock()
+	defer upl.mu.Unlock()
+	if len(upl.uploadCalls) != 2 {
+		t.Fatalf("expected 2 upload calls, got %d", len(upl.uploadCalls))
+	}
+}
 
-			store.mu.Lock()
-			if len(store.createEmployeeCalls) != 1 {
-				t.Fatalf("expected 1 store call, got %d", len(store.createEmployeeCalls))
-			}
-			call := store.createEmployeeCalls[0]
-			store.mu.Unlock()
+func TestCreateEmployeeRejectsKeptDocument(t *testing.T) {
+	service, store, upl := newTestService(t)
+	employeePrincipal := auth.Principal{UserID: 1, Role: user.UserRoleEmployee}
+	req := CreateEmployeeRequest{BaseEmployeeRequest: BaseEmployeeRequest{Position: "Dev", Role: "Backend", YearsOfExperience: Years2To5Y}}
 
-			if (call.File == nil) != tt.expectedNil {
-				t.Fatalf("expected file nil=%v, got %v", tt.expectedNil, call.File == nil)
-			}
-
-			if !tt.expectedNil {
-				if call.File.Type != tt.expectedType {
-					t.Fatalf("expected type %q, got %q", tt.expectedType, call.File.Type)
-				}
-				if call.File.Bucket != "test-bucket" || call.File.ObjectKey != "employees/cert.pdf" {
-					t.Fatalf("unexpected bucket/key: %s/%s", call.File.Bucket, call.File.ObjectKey)
-				}
-				if call.File.OriginalFilename != tt.filename || call.File.ContentType != tt.contentType || call.File.SizeBytes != tt.size {
-					t.Fatalf("unexpected metadata: filename=%s contentType=%s size=%d", call.File.OriginalFilename, call.File.ContentType, call.File.SizeBytes)
-				}
-				if call.File.ChecksumSHA256 != "deadbeef" {
-					t.Fatalf("unexpected checksum %q", call.File.ChecksumSHA256)
-				}
-				if call.File.Status != employeeFileStatusUploaded {
-					t.Fatalf("unexpected status %q", call.File.Status)
-				}
-
-				uploader.mu.Lock()
-				if len(uploader.uploadCalls) != 1 {
-					t.Fatalf("expected 1 upload call, got %d", len(uploader.uploadCalls))
-				}
-				uploader.mu.Unlock()
-			}
-		})
+	err := service.CreateEmployee(context.Background(), req, employeePrincipal, []CertificationEntry{
+		{Name: "Scrum Master", Upload: pdfUpload("scrum.pdf")},
+		{Name: "ITIL", KeepFileID: int32Ptr(9)},
+	})
+	if !errors.Is(err, ErrInvalidCertifications) {
+		t.Fatalf("expected ErrInvalidCertifications, got %v", err)
+	}
+	if len(store.createEmployeeCalls) != 0 || len(upl.uploadCalls) != 0 {
+		t.Fatalf("expected no store or upload calls, got %d/%d", len(store.createEmployeeCalls), len(upl.uploadCalls))
 	}
 }
 
 func TestCreateEmployeeEmployerRejectedBeforeUpload(t *testing.T) {
 	service, store, upl := newTestService(t)
 	employerPrincipal := auth.Principal{UserID: 1, Role: user.UserRoleEmployer}
-
-	file := newFakeFile("%PDF-1.4")
 	req := CreateEmployeeRequest{BaseEmployeeRequest: BaseEmployeeRequest{Position: "Dev", Role: "Backend", YearsOfExperience: Years2To5Y}}
 
-	err := service.CreateEmployee(context.Background(), req, employerPrincipal, file, "cert.pdf", "application/pdf", 8)
+	err := service.CreateEmployee(context.Background(), req, employerPrincipal, []CertificationEntry{{Name: "AWS", Upload: pdfUpload("cert.pdf")}})
 	if !errors.Is(err, user.ErrProfileRoleForbidden) {
 		t.Fatalf("expected ErrProfileRoleForbidden, got %v", err)
 	}
@@ -160,32 +165,32 @@ func TestCreateEmployeeCleanupOnStoreFailure(t *testing.T) {
 	service, store, upl := newTestService(t)
 	store.createEmployeeErr = errors.New("store failed")
 	employeePrincipal := auth.Principal{UserID: 1, Role: user.UserRoleEmployee}
-
-	file := newFakeFile("%PDF-1.4")
 	req := CreateEmployeeRequest{BaseEmployeeRequest: BaseEmployeeRequest{Position: "Dev", Role: "Backend", YearsOfExperience: Years2To5Y}}
 
-	err := service.CreateEmployee(context.Background(), req, employeePrincipal, file, "cert.pdf", "application/pdf", 8)
+	err := service.CreateEmployee(context.Background(), req, employeePrincipal, []CertificationEntry{
+		{Name: "Scrum Master", Upload: pdfUpload("scrum.pdf")},
+		{Name: "AWS", Upload: pdfUpload("aws.pdf")},
+	})
 	if err == nil {
 		t.Fatal("expected error")
 	}
 
-	select {
-	case call := <-upl.deleteCalls:
-		if call.Bucket != "test-bucket" || call.Key != "employees/cert.pdf" {
-			t.Fatalf("unexpected cleanup bucket/key: %s/%s", call.Bucket, call.Key)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected asynchronous cleanup call")
-	}
+	expectDeletes(t, upl, "employees/scrum.pdf", "employees/aws.pdf")
 }
 
-func TestUpdateEmployeeUploadMetadata(t *testing.T) {
+func TestUpdateEmployeeKeepsReplacesAndRemovesDocuments(t *testing.T) {
 	service, store, upl := newTestService(t)
-
-	file := newFakeFile("%PDF-1.5")
+	store.updateEmployeeRemoved = []RemovedFile{
+		{Bucket: "test-bucket", ObjectKey: "certifications/aws-viejo.pdf"},
+		{Bucket: "test-bucket", ObjectKey: "certifications/k8s.pdf"},
+	}
 	req := CreateEmployeeRequest{BaseEmployeeRequest: BaseEmployeeRequest{Position: "Senior Dev", Role: "Backend", YearsOfExperience: Years5To10Y}}
 
-	err := service.UpdateEmployee(context.Background(), 5, req, file, "updated.pdf", "application/pdf", 9)
+	err := service.UpdateEmployee(context.Background(), 5, req, []CertificationEntry{
+		{Name: "Scrum Master", KeepFileID: int32Ptr(31)},
+		{Name: "AWS Cloud Practitioner", Upload: pdfUpload("aws-nuevo.pdf")},
+		{Name: "Kubernetes"},
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -200,38 +205,36 @@ func TestUpdateEmployeeUploadMetadata(t *testing.T) {
 	if call.EmployeeID != 5 {
 		t.Fatalf("expected employeeID 5, got %d", call.EmployeeID)
 	}
-	if call.File == nil {
-		t.Fatal("expected file metadata")
+	if len(call.Kept) != 1 || call.Kept[0] != (KeptCertificationFile{FileID: 31, Name: "Scrum Master"}) {
+		t.Fatalf("unexpected kept files: %+v", call.Kept)
 	}
-	if call.File.OriginalFilename != "updated.pdf" || call.File.ObjectKey != "employees/cert.pdf" {
-		t.Fatalf("unexpected metadata: filename=%s key=%s", call.File.OriginalFilename, call.File.ObjectKey)
+	if len(call.Files) != 1 || call.Files[0].CertificationName != "AWS Cloud Practitioner" || call.Files[0].OriginalFilename != "aws-nuevo.pdf" {
+		t.Fatalf("unexpected new files: %+v", call.Files)
 	}
 
-	upl.mu.Lock()
-	if len(upl.uploadCalls) != 1 {
-		t.Fatalf("expected 1 upload call, got %d", len(upl.uploadCalls))
-	}
-	upl.mu.Unlock()
+	// Lo que la base dio de baja se borra del almacenamiento después del commit.
+	expectDeletes(t, upl, "certifications/aws-viejo.pdf", "certifications/k8s.pdf")
 }
 
 func TestUpdateEmployeeCleanupOnStoreFailure(t *testing.T) {
 	service, store, upl := newTestService(t)
-	store.updateEmployeeErr = errors.New("store failed")
-
-	file := newFakeFile("%PDF-1.5")
+	store.updateEmployeeErr = invalidCertifications("certification document not found")
+	store.updateEmployeeRemoved = []RemovedFile{{Bucket: "test-bucket", ObjectKey: "certifications/no-borrar.pdf"}}
 	req := CreateEmployeeRequest{BaseEmployeeRequest: BaseEmployeeRequest{Position: "Dev", Role: "Backend", YearsOfExperience: Years2To5Y}}
 
-	err := service.UpdateEmployee(context.Background(), 5, req, file, "cert.pdf", "application/pdf", 8)
-	if err == nil {
-		t.Fatal("expected error")
+	err := service.UpdateEmployee(context.Background(), 5, req, []CertificationEntry{
+		{Name: "AWS", Upload: pdfUpload("cert.pdf")},
+		{Name: "ITIL", KeepFileID: int32Ptr(999)},
+	})
+	if !errors.Is(err, ErrInvalidCertifications) {
+		t.Fatalf("expected ErrInvalidCertifications, got %v", err)
 	}
 
+	// Solo se limpia lo recién subido: una transacción revertida no dio de baja nada.
+	expectDeletes(t, upl, "employees/cert.pdf")
 	select {
 	case call := <-upl.deleteCalls:
-		if call.Bucket != "test-bucket" || call.Key != "employees/cert.pdf" {
-			t.Fatalf("unexpected cleanup bucket/key: %s/%s", call.Bucket, call.Key)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("expected asynchronous cleanup call")
+		t.Fatalf("unexpected delete %+v", call)
+	case <-time.After(100 * time.Millisecond):
 	}
 }

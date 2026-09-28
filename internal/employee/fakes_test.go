@@ -2,7 +2,6 @@ package employee
 
 import (
 	"context"
-	"mime/multipart"
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -55,23 +54,17 @@ type fakeEmployeeService struct {
 }
 
 type createEmployeeCall struct {
-	Ctx         context.Context
-	Req         CreateEmployeeRequest
-	Principal   auth.Principal
-	File        multipart.File
-	Filename    string
-	ContentType string
-	Size        int64
+	Ctx            context.Context
+	Req            CreateEmployeeRequest
+	Principal      auth.Principal
+	Certifications []CertificationEntry
 }
 
 type updateEmployeeCall struct {
-	Ctx         context.Context
-	EmployeeID  int32
-	Req         CreateEmployeeRequest
-	File        multipart.File
-	Filename    string
-	ContentType string
-	Size        int64
+	Ctx            context.Context
+	EmployeeID     int32
+	Req            CreateEmployeeRequest
+	Certifications []CertificationEntry
 }
 
 type locationCall struct {
@@ -99,32 +92,26 @@ type educationCall struct {
 	Documents  []EducationDocumentUpload
 }
 
-func (f *fakeEmployeeService) CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest, principal auth.Principal, file multipart.File, filename, contentType string, size int64) error {
+func (f *fakeEmployeeService) CreateEmployee(ctx context.Context, employeeReq CreateEmployeeRequest, principal auth.Principal, certifications []CertificationEntry) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.createEmployeeCalls = append(f.createEmployeeCalls, createEmployeeCall{
-		Ctx:         ctx,
-		Req:         employeeReq,
-		Principal:   principal,
-		File:        file,
-		Filename:    filename,
-		ContentType: contentType,
-		Size:        size,
+		Ctx:            ctx,
+		Req:            employeeReq,
+		Principal:      principal,
+		Certifications: certifications,
 	})
 	return f.createEmployeeErr
 }
 
-func (f *fakeEmployeeService) UpdateEmployee(ctx context.Context, employeeID int32, employeeReq CreateEmployeeRequest, file multipart.File, filename, contentType string, size int64) error {
+func (f *fakeEmployeeService) UpdateEmployee(ctx context.Context, employeeID int32, employeeReq CreateEmployeeRequest, certifications []CertificationEntry) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updateEmployeeCalls = append(f.updateEmployeeCalls, updateEmployeeCall{
-		Ctx:         ctx,
-		EmployeeID:  employeeID,
-		Req:         employeeReq,
-		File:        file,
-		Filename:    filename,
-		ContentType: contentType,
-		Size:        size,
+		Ctx:            ctx,
+		EmployeeID:     employeeID,
+		Req:            employeeReq,
+		Certifications: certifications,
 	})
 	return f.updateEmployeeErr
 }
@@ -225,8 +212,9 @@ type fakeEmployeeStore struct {
 	createEmployeeID    int32
 	createEmployeeErr   error
 
-	updateEmployeeCalls []storeUpdateEmployeeCall
-	updateEmployeeErr   error
+	updateEmployeeCalls   []storeUpdateEmployeeCall
+	updateEmployeeRemoved []RemovedFile
+	updateEmployeeErr     error
 
 	getEmployeeCalls []storeGetEmployeeCall
 	getEmployeeData  Employee
@@ -279,14 +267,15 @@ type storeCreateEmployeeCall struct {
 	Ctx    context.Context
 	Req    CreateEmployeeRequest
 	UserID int32
-	File   *EmployeeFileMetadata
+	Files  []EmployeeFileMetadata
 }
 
 type storeUpdateEmployeeCall struct {
 	Ctx        context.Context
 	EmployeeID int32
 	Req        CreateEmployeeRequest
-	File       *EmployeeFileMetadata
+	Kept       []KeptCertificationFile
+	Files      []EmployeeFileMetadata
 }
 
 type storeGetEmployeeCall struct {
@@ -294,18 +283,21 @@ type storeGetEmployeeCall struct {
 	ID  int32
 }
 
-func (f *fakeEmployeeStore) CreateEmployee(ctx context.Context, employee CreateEmployeeRequest, userID int32, file *EmployeeFileMetadata) (int32, error) {
+func (f *fakeEmployeeStore) CreateEmployee(ctx context.Context, employee CreateEmployeeRequest, userID int32, files []EmployeeFileMetadata) (int32, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.createEmployeeCalls = append(f.createEmployeeCalls, storeCreateEmployeeCall{Ctx: ctx, Req: employee, UserID: userID, File: file})
+	f.createEmployeeCalls = append(f.createEmployeeCalls, storeCreateEmployeeCall{Ctx: ctx, Req: employee, UserID: userID, Files: files})
 	return f.createEmployeeID, f.createEmployeeErr
 }
 
-func (f *fakeEmployeeStore) UpdateEmployee(ctx context.Context, employeeID int32, employee CreateEmployeeRequest, file *EmployeeFileMetadata) error {
+func (f *fakeEmployeeStore) UpdateEmployee(ctx context.Context, employeeID int32, employee CreateEmployeeRequest, kept []KeptCertificationFile, files []EmployeeFileMetadata) ([]RemovedFile, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.updateEmployeeCalls = append(f.updateEmployeeCalls, storeUpdateEmployeeCall{Ctx: ctx, EmployeeID: employeeID, Req: employee, File: file})
-	return f.updateEmployeeErr
+	f.updateEmployeeCalls = append(f.updateEmployeeCalls, storeUpdateEmployeeCall{Ctx: ctx, EmployeeID: employeeID, Req: employee, Kept: kept, Files: files})
+	if f.updateEmployeeErr != nil {
+		return nil, f.updateEmployeeErr
+	}
+	return f.updateEmployeeRemoved, nil
 }
 
 func (f *fakeEmployeeStore) CreateLocationWithConnections(ctx context.Context, employeeID int32, locationRequest CreateEmployeeLocationRequest) error {
@@ -438,7 +430,11 @@ func (f *fakeUploader) Upload(ctx context.Context, input uploader.UploadInput) (
 	if f.uploadErr != nil {
 		return nil, f.uploadErr
 	}
-	return f.uploadOut, nil
+	// La clave se deriva del nombre para que un request con varios archivos produzca claves
+	// distinguibles, como en S3.
+	out := *f.uploadOut
+	out.Key = aws.String("employees/" + input.Filename)
+	return &out, nil
 }
 
 func (f *fakeUploader) Delete(ctx context.Context, bucket, key string) error {

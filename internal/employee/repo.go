@@ -18,23 +18,15 @@ func NewRepository(db *sql.DB) *EmployeeRepository {
 	return &EmployeeRepository{db: db}
 }
 
-func (r *EmployeeRepository) CreateEmployee(ctx context.Context, employee CreateEmployeeRequest, userID int32, file *EmployeeFileMetadata) (int32, error) {
-	q := database.New(r.db)
-	if file == nil {
-		return q.CreateEmployeeWithoutFile(ctx, database.CreateEmployeeWithoutFileParams{
-			Position:          employee.Position,
-			Role:              employee.Role,
-			YearsOfExperience: string(employee.YearsOfExperience),
-			Certifications:    employee.Certifications,
-			PortfolioUrl: sql.NullString{
-				String: employee.PortfolioURL,
-				Valid:  employee.PortfolioURL != "",
-			},
-			UserID: userID,
-		})
+func (r *EmployeeRepository) CreateEmployee(ctx context.Context, employee CreateEmployeeRequest, userID int32, files []EmployeeFileMetadata) (int32, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
 	}
+	defer tx.Rollback()
 
-	employeeID, err := q.CreateEmployee(ctx, database.CreateEmployeeParams{
+	qtx := database.New(r.db).WithTx(tx)
+	employeeID, err := qtx.CreateEmployeeWithoutFile(ctx, database.CreateEmployeeWithoutFileParams{
 		Position:          employee.Position,
 		Role:              employee.Role,
 		YearsOfExperience: string(employee.YearsOfExperience),
@@ -43,34 +35,55 @@ func (r *EmployeeRepository) CreateEmployee(ctx context.Context, employee Create
 			String: employee.PortfolioURL,
 			Valid:  employee.PortfolioURL != "",
 		},
-		UserID:           userID,
-		Type:             file.Type,
-		Bucket:           file.Bucket,
-		ObjectKey:        file.ObjectKey,
-		OriginalFilename: file.OriginalFilename,
-		ContentType:      file.ContentType,
-		SizeBytes:        file.SizeBytes,
-		ChecksumSha256: sql.NullString{
-			String: file.ChecksumSHA256,
-			Valid:  file.ChecksumSHA256 != "",
-		},
-		Status: file.Status,
+		UserID: userID,
 	})
 	if err != nil {
+		return 0, err
+	}
+
+	if err := createEmployeeFiles(ctx, qtx, employeeID, files); err != nil {
+		return 0, err
+	}
+
+	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 
 	return employeeID, nil
 }
 
-func (r *EmployeeRepository) UpdateEmployee(ctx context.Context, employeeID int32, employee CreateEmployeeRequest, file *EmployeeFileMetadata) error {
+// UpdateEmployee aplica el conjunto de certificados en un orden que el índice único parcial
+// tolera en cualquier caso: primero da de baja los asociados que no se conservan, después
+// libera el nombre de los conservados y recién ahí los reasocia, antes de insertar los nuevos.
+// Reasignar en un solo paso chocaría con el índice al renombrar o intercambiar dos
+// certificaciones.
+func (r *EmployeeRepository) UpdateEmployee(ctx context.Context, employeeID int32, employee CreateEmployeeRequest, kept []KeptCertificationFile, files []EmployeeFileMetadata) ([]RemovedFile, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer tx.Rollback()
 
 	qtx := database.New(r.db).WithTx(tx)
+
+	keptIDs := make([]int32, 0, len(kept))
+	for _, file := range kept {
+		keptIDs = append(keptIDs, file.FileID)
+	}
+
+	if len(keptIDs) > 0 {
+		found, err := qtx.ListUploadedEmployeeFileIDs(ctx, database.ListUploadedEmployeeFileIDsParams{
+			EmployeeID: employeeID,
+			Ids:        keptIDs,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(found) != len(keptIDs) {
+			return nil, invalidCertifications("certification document not found")
+		}
+	}
+
 	if err := qtx.UpdateEmployee(ctx, database.UpdateEmployeeParams{
 		ID:                employeeID,
 		Position:          employee.Position,
@@ -82,26 +95,71 @@ func (r *EmployeeRepository) UpdateEmployee(ctx context.Context, employeeID int3
 			Valid:  employee.PortfolioURL != "",
 		},
 	}); err != nil {
-		return err
+		return nil, err
 	}
 
-	if file != nil {
-		if err := qtx.CreateEmployeeFile(ctx, database.CreateEmployeeFileParams{
-			EmployeeID:       employeeID,
-			Type:             file.Type,
-			Bucket:           file.Bucket,
-			ObjectKey:        file.ObjectKey,
-			OriginalFilename: file.OriginalFilename,
-			ContentType:      file.ContentType,
-			SizeBytes:        file.SizeBytes,
-			ChecksumSha256:   sql.NullString{String: file.ChecksumSHA256, Valid: file.ChecksumSHA256 != ""},
-			Status:           file.Status,
+	rows, err := qtx.MarkUnkeptCertificationFilesDeleted(ctx, database.MarkUnkeptCertificationFilesDeletedParams{
+		EmployeeID: employeeID,
+		KeptIds:    keptIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(keptIDs) > 0 {
+		if err := qtx.ClearEmployeeFileCertificationNames(ctx, database.ClearEmployeeFileCertificationNamesParams{
+			EmployeeID: employeeID,
+			Ids:        keptIDs,
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, file := range kept {
+		if err := qtx.SetEmployeeFileCertificationName(ctx, database.SetEmployeeFileCertificationNameParams{
+			CertificationName: sql.NullString{String: file.Name, Valid: true},
+			EmployeeID:        employeeID,
+			ID:                file.FileID,
+		}); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := createEmployeeFiles(ctx, qtx, employeeID, files); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	removed := make([]RemovedFile, 0, len(rows))
+	for _, row := range rows {
+		removed = append(removed, RemovedFile{Bucket: row.Bucket, ObjectKey: row.ObjectKey})
+	}
+
+	return removed, nil
+}
+
+func createEmployeeFiles(ctx context.Context, q *database.Queries, employeeID int32, files []EmployeeFileMetadata) error {
+	for _, file := range files {
+		if err := q.CreateEmployeeFile(ctx, database.CreateEmployeeFileParams{
+			EmployeeID:        employeeID,
+			Type:              file.Type,
+			Bucket:            file.Bucket,
+			ObjectKey:         file.ObjectKey,
+			OriginalFilename:  file.OriginalFilename,
+			ContentType:       file.ContentType,
+			SizeBytes:         file.SizeBytes,
+			ChecksumSha256:    sql.NullString{String: file.ChecksumSHA256, Valid: file.ChecksumSHA256 != ""},
+			Status:            file.Status,
+			CertificationName: sql.NullString{String: file.CertificationName, Valid: file.CertificationName != ""},
 		}); err != nil {
 			return err
 		}
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 func nullInt16ToPtr(n sql.NullInt16) *int16 {
@@ -128,7 +186,12 @@ func (r *EmployeeRepository) GetEmployee(ctx context.Context, ID int32) (Employe
 		return Employee{}, err
 	}
 
-	var files []FileItem
+	var certifications []CertificationResponseItem
+	if err := json.Unmarshal([]byte(row.CertificationItems), &certifications); err != nil {
+		return Employee{}, err
+	}
+
+	var files []ProfileFileItem
 	if err := json.Unmarshal([]byte(row.Files), &files); err != nil {
 		return Employee{}, err
 	}
@@ -140,7 +203,7 @@ func (r *EmployeeRepository) GetEmployee(ctx context.Context, ID int32) (Employe
 		Position:             row.Position,
 		Role:                 row.Role,
 		YearsOfExperience:    row.YearsOfExperience,
-		Certifications:       row.Certifications,
+		Certifications:       certifications,
 		PortfolioURL:         row.PortfolioUrl.String,
 		Timezone:             row.Timezone.String,
 		Os:                   row.Os.String,
@@ -291,6 +354,11 @@ func (r *EmployeeRepository) GetEmployeeProfileByID(ctx context.Context, employe
 		return EmployeeProfile{}, err
 	}
 
+	var certifications []CertificationResponseItem
+	if err := json.Unmarshal([]byte(row.CertificationItems), &certifications); err != nil {
+		return EmployeeProfile{}, err
+	}
+
 	var files []ProfileFileItem
 	if err := json.Unmarshal([]byte(row.Files), &files); err != nil {
 		return EmployeeProfile{}, err
@@ -303,7 +371,7 @@ func (r *EmployeeRepository) GetEmployeeProfileByID(ctx context.Context, employe
 		Position:             row.Position,
 		Role:                 row.Role,
 		YearsOfExperience:    row.YearsOfExperience,
-		Certifications:       row.Certifications,
+		Certifications:       certifications,
 		PortfolioURL:         row.PortfolioUrl.String,
 		Timezone:             row.Timezone.String,
 		Os:                   row.Os.String,

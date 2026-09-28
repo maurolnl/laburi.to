@@ -30,14 +30,14 @@ func profileWrites() []profileWrite {
 		{
 			name: "create employee",
 			run: func(s *employeeService) error {
-				return s.CreateEmployee(context.Background(), CreateEmployeeRequest{}, principal, nil, "", "", 0)
+				return s.CreateEmployee(context.Background(), CreateEmployeeRequest{}, principal, nil)
 			},
 			failStore: func(store *fakeEmployeeStore, err error) { store.createEmployeeErr = err },
 		},
 		{
 			name: "update employee",
 			run: func(s *employeeService) error {
-				return s.UpdateEmployee(context.Background(), testTriggerEmployeeID, CreateEmployeeRequest{}, nil, "", "", 0)
+				return s.UpdateEmployee(context.Background(), testTriggerEmployeeID, CreateEmployeeRequest{}, nil)
 			},
 			failStore: func(store *fakeEmployeeStore, err error) { store.updateEmployeeErr = err },
 		},
