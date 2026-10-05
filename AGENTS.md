@@ -89,7 +89,9 @@ Públicas:
 
 - `GET /healthz`
 - `POST /auth/register` → `200`
-- `POST /auth/login` → `202` con `{id, email, role, token, refreshToken}`
+- `POST /auth/login` → `202` con `{id, email, role, token, refreshToken}`; todos sus errores
+  en JSON `{error}`: `401` `invalid credentials` (email inexistente y contraseña incorrecta
+  responden igual), `400` para body o validación y `500` genérico sin detalle interno.
 
 Autenticadas con `AuthenticatedUser` (JWT):
 

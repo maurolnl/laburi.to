@@ -2,6 +2,8 @@ package user
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"github.com/maurolnl/bolsa-de-trabajo-back/internal/auth"
 )
@@ -41,6 +43,11 @@ func (s *userService) SaveUser(ctx context.Context, user CreateUserReq) error {
 
 func (s *userService) Login(ctx context.Context, email, password string) (int32, UserRole, string, string, error) {
 	user, err := s.repo.FindByEmail(ctx, email)
+	// Un email inexistente responde igual que una contraseña incorrecta, para no revelar
+	// qué cuentas existen.
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, "", "", "", ErrInvalidCredentials
+	}
 	if err != nil {
 		return 0, "", "", "", err
 	}
