@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,6 +17,7 @@ import (
 type fakeUserService struct {
 	savedUsers       []CreateUserReq
 	loginRole        UserRole
+	loginErr         error
 	currentUser      User
 	currentUserID    int32
 	getCurrentCalled bool
@@ -27,6 +29,9 @@ func (f *fakeUserService) SaveUser(_ context.Context, req CreateUserReq) error {
 }
 
 func (f *fakeUserService) Login(_ context.Context, _, _ string) (int32, UserRole, string, string, error) {
+	if f.loginErr != nil {
+		return 0, "", "", "", f.loginErr
+	}
 	return 7, f.loginRole, "access-token", "refresh-token", nil
 }
 
@@ -133,5 +138,48 @@ func TestGetCurrentUserUsesTokenPrincipalAndExposesRole(t *testing.T) {
 	}
 	if response["ID"] != float64(7) || response["Role"] != string(UserRoleEmployer) {
 		t.Fatalf("unexpected response: %#v", response)
+	}
+}
+
+func TestLoginErrorsRespondJSON(t *testing.T) {
+	validBody, err := json.Marshal(newTestLoginRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name       string
+		body       string
+		loginErr   error
+		wantStatus int
+		wantError  string
+	}{
+		{"invalid credentials", string(validBody), ErrInvalidCredentials, http.StatusUnauthorized, "invalid credentials"},
+		{"internal error is not leaked", string(validBody), errors.New("pq: connection refused"), http.StatusInternalServerError, "could not log in"},
+		{"malformed body", "{", nil, http.StatusBadRequest, "could not decode request body"},
+		{"missing password", `{"email":"user@example.com"}`, nil, http.StatusBadRequest, ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			handler := NewHandler(&fakeUserService{loginErr: tc.loginErr}, validator.New())
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewBufferString(tc.body))
+
+			handler.Login(recorder, request)
+
+			if recorder.Code != tc.wantStatus {
+				t.Fatalf("expected status %d, got %d: %s", tc.wantStatus, recorder.Code, recorder.Body.String())
+			}
+			var response map[string]string
+			if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+				t.Fatalf("expected JSON body: %v", err)
+			}
+			if response["error"] == "" {
+				t.Fatalf("expected error field, got %#v", response)
+			}
+			if tc.wantError != "" && response["error"] != tc.wantError {
+				t.Fatalf("expected error %q, got %q", tc.wantError, response["error"])
+			}
+		})
 	}
 }
